@@ -4,12 +4,10 @@
 #include <stdint.h>
 #include <libftdi1/ftdi.h>
 
+#include <QByteArray>
 
 #define MPSSE_OK		0
 #define MPSSE_FAIL		-1
-
-#define MSB			0x00
-#define LSB			0x08
 
 #define CHUNK_SIZE		65535
 #define SPI_RW_SIZE		(63 * 1024)
@@ -146,32 +144,42 @@ enum GPIO_PINS
     GPIOH7 = 11
 };
 
+enum ENDIANESS {
+    MSB = 0x00,
+    LSB = 0x08,
+};
+
 public:
-    LibMPSSE(int vid, int pid, modes mode, int frequency, int endianess, Interface interface);
+    LibMPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, Interface interface);
     bool open();
     int pinHigh(GPIO_PINS pin);
     int pinLow(GPIO_PINS pin);
+    void close();
+
+    void setCSIdleState(int idle);
+    void start();
+    int write(QByteArray data);
+    QByteArray read(int size);
+    int stop();
+
+    bool getIsOpened() const;
 
 private:
-    bool openIndex(int vid, int pid, modes mode, int freq, int endianess, Interface interface, const char *description, const char *serial, int index);
+    bool openIndex(int vid, int pid, modes mode, int freq, ENDIANESS endianess, Interface interface, const char *description, const char *serial, int index);
     void flushAfterRead(int tf);
     void setTimeouts(int timeout);
-    int rawRead(unsigned char *buf, int size);
-    int rawWrite(unsigned char *buf, int size);
+    QByteArray rawRead(int size);
+    int rawWrite(QByteArray buf);
     int setClock(uint32_t freq);
     uint16_t freq2div(uint32_t system_clock, uint32_t freq);
     uint32_t div2freq(uint32_t system_clock, uint16_t div);
     int setLoopback(int enable);
-    int setMode(int endianess);
+    int setMode(ENDIANESS endianess);
     int setBitsLow(int port);
     void setAck(int ack);
     void sendAcks();
     int gpioWrite(int pin, int direction);
     int setBitsHigh(int port);
-    void close();
-
-public:
-    struct mpsse_context *context;
 
 private:
     struct ftdi_context ftdi;
@@ -198,8 +206,10 @@ private:
     int pid;
     modes mode;
     int frequency;
-    int endianess;
+    ENDIANESS endianess;
     Interface interface;
+    QByteArray build_block_buffer(uint8_t cmd, QByteArray data);
+    QByteArray internalRead(int size);
 };
 
 #endif // MPSSE_H

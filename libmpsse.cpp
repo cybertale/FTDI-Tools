@@ -3,7 +3,7 @@
 #include <cstdlib>
 #include <cstring>
 
-LibMPSSE::LibMPSSE(int vid, int pid, modes mode, int frequency, int endianess, Interface interface)
+LibMPSSE::LibMPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, Interface interface)
     : vid(vid)
     , pid(pid)
     , mode(mode)
@@ -64,36 +64,31 @@ bool LibMPSSE::open()
  */
 int LibMPSSE::setLoopback(int enable)
 {
-    unsigned char buf[1] = { 0 };
+    QByteArray buf;
     int retval = MPSSE_FAIL;
 
     if(enable)
-    {
-        buf[0] = LOOPBACK_START;
-    }
+        buf.append(LOOPBACK_START);
     else
-    {
-        buf[0] = LOOPBACK_END;
-    }
+        buf.append(LOOPBACK_END);
 
-    retval = rawWrite(buf, 1);
+    retval = rawWrite(buf);
 
         return retval;
-    }
-
+}
 
 /* Write data to the FTDI chip */
-int LibMPSSE::rawWrite(unsigned char *buf, int size)
+int LibMPSSE::rawWrite(QByteArray buf)
 {
-        int retval = MPSSE_FAIL;
+    int retval = MPSSE_FAIL;
+    unsigned char bufSend[buf.count()];
 
-        if(mode)
-    {
-        if(ftdi_write_data(&ftdi, buf, size) == size)
-            {
-                    retval = MPSSE_OK;
-        }
-        }
+    for (int i = 0; i < buf.count(); i++)
+        bufSend[i] = static_cast<unsigned char>(buf.at(i));
+
+    if(mode)
+        if(ftdi_write_data(&ftdi, bufSend, buf.count()) == buf.count())
+            retval = MPSSE_OK;
 
     return retval;
 }
@@ -133,13 +128,12 @@ void LibMPSSE::sendAcks()
 /* Set the low bit pins high/low */
 int LibMPSSE::setBitsLow(int port)
 {
-    char buf[CMD_SIZE] = { 0 };
+    QByteArray buf;
 
-    buf[0] = SET_BITS_LOW;
-    buf[1] = port;
-    buf[2] = tris;
-
-    return rawWrite((unsigned char *) &buf, sizeof(buf));
+    buf.append(SET_BITS_LOW);
+    buf.append(port);
+    buf.append(tris);
+    return rawWrite(buf);
 }
 
 /*
@@ -151,11 +145,11 @@ int LibMPSSE::setBitsLow(int port)
  * Returns MPSSE_OK on success.
  * Returns MPSSE_FAIL on failure.
  */
-int LibMPSSE::setMode(int endianess)
+int LibMPSSE::setMode(ENDIANESS endianess)
 {
-    int retval = MPSSE_OK, i = 0, setup_commands_size = 0;
-    unsigned char buf[CMD_SIZE] = { 0 };
-    unsigned char setup_commands[CMD_SIZE*MAX_SETUP_COMMANDS] = { 0 };
+    int retval = MPSSE_OK, setup_commands_size = 0;
+    QByteArray setup_commands;
+    QByteArray buf;
 
     /* Do not call is_valid_context() here, as the FTDI chip may not be completely configured when SetMode is called */
         /* Read and write commands need to include endianess */
@@ -179,7 +173,7 @@ int LibMPSSE::setMode(int endianess)
         setAck(ACK);
 
         /* Ensure adaptive clock is disabled */
-        setup_commands[setup_commands_size++] = DISABLE_ADAPTIVE_CLOCK;
+        setup_commands.append(DISABLE_ADAPTIVE_CLOCK);
 
         switch(mode)
         {
@@ -244,7 +238,7 @@ int LibMPSSE::setMode(int endianess)
                 /* I2C stop bit == data line goes from low to high while clock line is high - set data line low here, so the transition to the idle state triggers the stop condition. */
                 pstop &= ~DO & ~DI;
                 /* Enable three phase clock to ensure that I2C data is available on both the rising and falling clock edges */
-                setup_commands[setup_commands_size++] = ENABLE_3_PHASE_CLOCK;
+                setup_commands.append(ENABLE_3_PHASE_CLOCK);
                 break;
             case GPIO:
                 break;
@@ -255,7 +249,7 @@ int LibMPSSE::setMode(int endianess)
         /* Send any setup commands to the chip */
         if(retval == MPSSE_OK && setup_commands_size > 0)
         {
-            retval = rawWrite(setup_commands, setup_commands_size);
+            retval = rawWrite(setup_commands);
         }
 
         if(retval == MPSSE_OK)
@@ -267,11 +261,11 @@ int LibMPSSE::setMode(int endianess)
             trish = 0xFF;
             gpioh = 0x00;
 
-            buf[i++] = SET_BITS_HIGH;
-            buf[i++] = gpioh;
-            buf[i++] = trish;
+            buf.append(SET_BITS_HIGH);
+            buf.append(gpioh);
+            buf.append(trish);
 
-            retval = rawWrite(buf, i);
+            retval = rawWrite(buf);
         }
 
     return retval;
@@ -288,9 +282,10 @@ uint32_t LibMPSSE::div2freq(uint32_t system_clock, uint16_t div)
 }
 
 /* Read data from the FTDI chip */
-int LibMPSSE::rawRead(unsigned char *buf, int size)
+QByteArray LibMPSSE::rawRead(int size)
 {
     int n = 0, r = 0;
+    unsigned char buf[size];
 
     if(mode)
     {
@@ -312,7 +307,7 @@ int LibMPSSE::rawRead(unsigned char *buf, int size)
         }
     }
 
-    return n;
+    return QByteArray(reinterpret_cast<char *>(buf));
 }
 
 /* Sets the read and write timeout periods for bulk usb data transfers. */
@@ -339,21 +334,21 @@ int LibMPSSE::setClock(uint32_t freq)
     int retval = MPSSE_FAIL;
     uint32_t system_clock = 0;
     uint16_t divisor = 0;
-    unsigned char buf[CMD_SIZE] = { 0 };
+    QByteArray buf;
 
     /* Do not call is_valid_context() here, as the FTDI chip may not be completely configured when SetClock is called */
         if(freq > SIX_MHZ)
         {
-            buf[0] = TCK_X5;
+            buf.append(TCK_X5);
             system_clock = SIXTY_MHZ;
         }
         else
         {
-            buf[0] = TCK_D5;
+            buf.append(TCK_D5);
             system_clock = TWELVE_MHZ;
         }
 
-        if(rawWrite(buf, 1) == MPSSE_OK)
+        if(rawWrite(buf) == MPSSE_OK)
         {
             if(freq <= 0)
             {
@@ -364,11 +359,12 @@ int LibMPSSE::setClock(uint32_t freq)
                 divisor = freq2div(system_clock, freq);
             }
 
-            buf[0] = TCK_DIVISOR;
-            buf[1] = (divisor & 0xFF);
-            buf[2] = ((divisor >> 8) & 0xFF);
+            buf.clear();
+            buf.append(TCK_DIVISOR);
+            buf.append(divisor & 0xFF);
+            buf.append((divisor >> 8) & 0xFF);
 
-            if(rawWrite(buf, 3) == MPSSE_OK)
+            if(rawWrite(buf) == MPSSE_OK)
             {
                 clock = div2freq(system_clock, divisor);
                 retval = MPSSE_OK;
@@ -409,7 +405,7 @@ void LibMPSSE::flushAfterRead(int tf)
  * On success, open will be set to 1.
  * On failure, open will be set to 0.
  */
-bool LibMPSSE::openIndex(int vid, int pid, modes mode, int frequency, int endianess, Interface interface, const char *description, const char *serial, int index)
+bool LibMPSSE::openIndex(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, Interface interface, const char *description, const char *serial, int index)
 {
     int ret = 0;
         /* Legacy; flushing is no longer needed, so disable it by default. */
@@ -518,13 +514,18 @@ int LibMPSSE::pinLow(GPIO_PINS pin)
 /* Set the high bit pins high/low */
 int LibMPSSE::setBitsHigh(int port)
 {
-    char buf[CMD_SIZE] = { 0 };
+    QByteArray buf;
 
-    buf[0] = SET_BITS_HIGH;
-    buf[1] = port;
-    buf[2] = trish;
+    buf.append(SET_BITS_HIGH);
+    buf.append(port);
+    buf.append(trish);
 
-    return rawWrite((unsigned char *) &buf, sizeof(buf));
+    return rawWrite(buf);
+}
+
+bool LibMPSSE::getIsOpened() const
+{
+    return isOpened;
 }
 /* Set the GPIO pins high/low */
 int LibMPSSE::gpioWrite(int pin, int direction)
@@ -544,7 +545,9 @@ int LibMPSSE::gpioWrite(int pin, int direction)
 
         if(setBitsHigh(bitbang) == MPSSE_OK)
         {
-                    retval = rawWrite((unsigned char *) &bitbang, 1);
+            QByteArray buf;
+            buf.append(bitbang);
+            retval = rawWrite(buf);
         }
     }
     else
@@ -602,4 +605,310 @@ void LibMPSSE::close()
     }
 
     return;
+}
+
+/*
+ * Sets the idle state of the chip select pin. CS idles high by default.
+ *
+ * @mpsse - MPSSE context pointer.
+ * @idle  - Set to 1 to idle high, 0 to idle low.
+ *
+ * Returns void.
+ */
+void LibMPSSE::setCSIdleState(int idle)
+{
+        if(idle > 0)
+        {
+            /* Chip select idles high, active low */
+            pidle |= CS;
+            pstop |= CS;
+            pstart &= ~CS;
+        }
+        else
+        {
+            /* Chip select idles low, active high */
+            pidle &= ~CS;
+            pstop &= ~CS;
+            pstart |= CS;
+        }
+}
+
+/*
+ * Send data start condition.
+ *
+ * @mpsse - MPSSE context pointer.
+ *
+ * Returns MPSSE_OK on success.
+ * Returns MPSSE_FAIL on failure.
+ */
+void LibMPSSE::start()
+{
+    int status = MPSSE_OK;
+
+    if(mode == I2C && status == STARTED)
+    {
+        /* Set the default pin states while the clock is low since this is an I2C repeated start condition */
+        status |= setBitsLow(pidle & ~SK);
+
+        /* Make sure the pins are in their default idle state */
+        status |= setBitsLow(pidle);
+    }
+
+    /* Set the start condition */
+    status |= setBitsLow(pstart);
+
+    /*
+     * Hackish work around to properly support SPI mode 3.
+     * SPI3 clock idles high, but needs to be set low before sending out
+     * data to prevent unintenteded clock glitches from the FT2232.
+     */
+    if(mode == SPI3)
+        {
+        status |= setBitsLow(pstart & ~SK);
+        }
+    /*
+     * Hackish work around to properly support SPI mode 1.
+     * SPI1 clock idles low, but needs to be set high before sending out
+     * data to preven unintended clock glitches from the FT2232.
+     */
+    else if(mode == SPI1)
+    {
+        status |= setBitsLow(pstart | SK);
+    }
+
+    status = STARTED;
+}
+
+/*
+ * Send data out via the selected serial protocol.
+ *
+ * @mpsse - MPSSE context pointer.
+ * @data  - Buffer of data to send.
+ * @size  - Size of data.
+ *
+ * Returns MPSSE_OK on success.
+ * Returns MPSSE_FAIL on failure.
+ */
+int LibMPSSE::write(QByteArray data)
+{
+    QByteArray buf;
+    int retval = MPSSE_FAIL, txsize = 0, n = 0;
+
+        if(mode)
+        {
+            while(n < data.count())
+            {
+                txsize = data.count() - n;
+                if(txsize > xsize)
+                    txsize = xsize;
+
+                /*
+                 * For I2C we need to send each byte individually so that we can
+                 * read back each individual ACK bit, so set the transmit size to 1.
+                 */
+                if(mode == I2C)
+                    txsize = 1;
+
+                buf = build_block_buffer(tx, data.mid(n));
+                retval = rawWrite(buf);
+                n += txsize;
+
+                if(retval == MPSSE_FAIL)
+                    break;
+
+                /* Read in the ACK bit and store it in rack */
+                if(mode == I2C)
+                {
+                    QByteArray buf = rawRead(1);
+                    rack = static_cast<uint8_t>(buf[0]);
+                }
+                else
+                    break;
+            }
+        }
+        return retval;
+}
+
+/* Performs a read. For internal use only; see Read() and ReadBits(). */
+QByteArray LibMPSSE::internalRead(int size)
+{
+    QByteArray buf;
+    int n = 0, rxsize = 0, retval = 0;
+    QByteArray data;
+//    QByteArray sbuf;
+
+    if(mode)
+    {
+        while(n < size)
+        {
+            rxsize = size - n;
+            if(rxsize > xsize)
+            {
+                rxsize = xsize;
+            }
+
+            data = build_block_buffer(rx, QByteArray(rxsize, static_cast<char>(0)));
+            retval = rawWrite(data);
+
+            if(retval == MPSSE_OK)
+            {
+    //                            n += rawRead(buf+n, rxsize);
+                buf.append(rawRead(rxsize));
+                n += rxsize;
+            }
+            else
+                break;
+        }
+    }
+    return buf;
+}
+QByteArray LibMPSSE::read(int size)
+{
+    return internalRead(size);
+}
+
+/* Builds a buffer of commands + data blocks */
+QByteArray LibMPSSE::build_block_buffer(uint8_t cmd, QByteArray data)
+{
+//    unsigned char *buf = NULL;
+    QByteArray buf;
+    int i = 0, j = 0, k = 0, dsize = 0, num_blocks = 0, total_size = 0, xfer_size = 0;
+    uint16_t rsize = 0;
+    int size = data.count();
+
+    /* Data block size is 1 in I2C, or when in bitmode */
+    if(mode == I2C || (cmd & MPSSE_BITMODE))
+    {
+        xfer_size = 1;
+    }
+    else
+    {
+        xfer_size = xsize;
+    }
+
+    num_blocks = (size / xfer_size);
+    if(size % xfer_size)
+    {
+        num_blocks++;
+    }
+
+    /* The total size of the data will be the data size + the write command */
+    total_size = size + (CMD_SIZE * num_blocks);
+
+    /* In I2C we have to add 3 additional commands per data block */
+    if(mode == I2C)
+    {
+        total_size += (CMD_SIZE * 3 * num_blocks);
+    }
+
+
+            for(j = 0; j < num_blocks; j++)
+            {
+                dsize = size - k;
+                if(dsize > xfer_size)
+                {
+                    dsize = xfer_size;
+                }
+
+                /* The reported size of this block is block size - 1 */
+                rsize = dsize - 1;
+
+                /* For I2C we need to ensure that the clock pin is set low prior to clocking out data */
+                if(mode == I2C)
+                {
+                    buf.append(SET_BITS_LOW);
+                    buf.append(pstart & ~SK);
+
+                    /* On receive, we need to ensure that the data out line is set as an input to avoid contention on the bus */
+                    if(cmd == rx)
+                    {
+                        buf.append(tris & ~DO);
+                    }
+                    else
+                    {
+                        buf.append(tris);
+                    }
+                }
+
+                /* Copy in the command for this block */
+                buf.append(cmd);
+                buf.append(rsize & 0xFF);
+                if(!(cmd & MPSSE_BITMODE))
+                {
+                    buf.append((rsize >> 8) & 0xFF);
+                }
+
+                /* On a write, copy the data to transmit after the command */
+                if(cmd == tx || cmd == txrx)
+                {
+                    buf.append(data.mid(k, dsize));
+
+                    /* i == offset into buf */
+                    i += dsize;
+                    /* k == offset into data */
+                    k += dsize;
+                }
+//                } else
+//                    buf.append(dsize, static_cast<char>(0));
+
+                /* In I2C mode we need to clock one ACK bit after each byte */
+                if(mode == I2C)
+                {
+                    /* If we are receiving data, then we need to clock out an ACK for each byte */
+                    if(cmd == rx)
+                    {
+                        buf.append(SET_BITS_LOW);
+                        buf.append(pstart & ~SK);
+                        buf.append(tris);
+
+                        buf.append(tx | MPSSE_BITMODE);
+                        buf.append(static_cast<char>(0));
+                        buf.append(tack);
+                    }
+                    /* If we are sending data, then we need to clock in an ACK for each byte */
+                    else if(cmd == tx)
+                    {
+                        /* Need to make data out an input to avoid contention on the bus when the slave sends an ACK */
+                        buf.append(SET_BITS_LOW);
+                        buf.append(pstart & ~SK);
+                        buf.append(tris & ~DO);
+
+                        buf.append(rx | MPSSE_BITMODE);
+                        buf.append(static_cast<char>(0));
+                        buf.append(SEND_IMMEDIATE);
+                    }
+                }
+    }
+
+    return buf;
+}
+
+/*
+* Send data stop condition.
+*
+* @mpsse - MPSSE context pointer.
+*
+* Returns MPSSE_OK on success.
+* Returns MPSSE_FAIL on failure.
+*/
+int LibMPSSE::stop()
+{
+    int retval = MPSSE_OK;
+
+    /* In I2C mode, we need to ensure that the data line goes low while the clock line is low to avoid sending an inadvertent start condition */
+    if(mode == I2C)
+    {
+    retval |= setBitsLow((pidle & ~DO & ~SK));
+    }
+
+    /* Send the stop condition */
+    retval |= setBitsLow(pstop);
+
+    if(retval == MPSSE_OK)
+    {
+    /* Restore the pins to their idle states */
+    retval |= setBitsLow(pidle);
+    }
+
+    status = STOPPED;
 }
