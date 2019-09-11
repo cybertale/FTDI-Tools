@@ -1,6 +1,7 @@
 ﻿#ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include <QBasicTimer>
 #include <QMainWindow>
 
 #include "mpsse.h"
@@ -18,6 +19,10 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+    // QObject interface
+protected:
+    void timerEvent(QTimerEvent *event) override;
+
 private:
     void onButtonListDevicesClicked();
     void onCheckGPIO0Clicked();
@@ -26,5 +31,6 @@ private:
     Ui::MainWindow *ui;
     MPSSE *mpsse;
     OLED *oled;
+    QBasicTimer *timerUpdate;
 };
 #endif // MAINWINDOW_H

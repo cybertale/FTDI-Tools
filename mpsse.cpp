@@ -10,6 +10,7 @@ MPSSE::MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, I
     , endianess(endianess)
     , interface(interface)
     , bufferWrite(new QByteArray())
+    , mutex(new QMutex())
     , directionHigh(0)
     , directionLow(0)
     , outputHigh(0)
@@ -319,24 +320,22 @@ void MPSSE::setGPIOState(GPIO_PINS pin, GPIO_MODE gpioMode, GPIO_STATE state)
     else
         *pData &= ~(1 << pinIndex);
 
+    mutex->lock();
     bufferWrite->append(cmd);
     bufferWrite->append(*pData);
     bufferWrite->append(*pMode);
+    mutex->unlock();
 }
 
 void MPSSE::start()
 {
     setGPIOState(CS, OUT, LOW);
     if (mode == I2C) {
-        for (int i = 0; i < 4; i++) {
-            setGPIOState(DO, OUT, HIGH);
-            setGPIOState(SK, OUT, HIGH);
-        }
+        setGPIOState(DO, OUT, HIGH);
+        setGPIOState(SK, OUT, HIGH);
 
-        for (int i = 0; i < 4; i++) {
-            setGPIOState(DO, OUT, LOW);
-            setGPIOState(SK, OUT, HIGH);
-        }
+        setGPIOState(DO, OUT, LOW);
+        setGPIOState(SK, OUT, HIGH);
 
         setGPIOState(DO, OUT, LOW);
         setGPIOState(SK, OUT, LOW);
@@ -356,34 +355,42 @@ void MPSSE::readBytes(int length)
 void MPSSE::clockBytesOut(QByteArray buffer)
 {
     //TODO mode MSB/LSB POS/NEG
+    mutex->lock();
     bufferWrite->append(CLOCK_BYTES_OUT_NEG_EDGE_MSB);
     int length = buffer.count() - 1;
     bufferWrite->append(static_cast<char>(length & 0xff));
     bufferWrite->append(static_cast<char>(length >> 8));
     for (int i = 0; i < buffer.count(); i++)
         bufferWrite->append(buffer.at(i));
+    mutex->unlock();
 }
 
 void MPSSE::clockBytesIn(int length)
 {
     length -= 1;
+    mutex->lock();
     bufferWrite->append(CLOCK_BYTES_IN_POS_EDGE_MSB);
     bufferWrite->append(static_cast<char>(length & 0xff));
     bufferWrite->append(static_cast<char>(length >> 8));
     bufferWrite->append(static_cast<char>(SEND_IMMEDIATE));
+    mutex->unlock();
 }
 
 void MPSSE::flushWrite()
 {
+    mutex->lock();
     rawWrite(*bufferWrite);
     bufferWrite->clear();
+    mutex->unlock();
 }
 
 void MPSSE::setTristate(uint16_t pins)
 {
+    mutex->lock();
     bufferWrite->append(static_cast<char>(SET_IO_TRISTATE));
     bufferWrite->append(static_cast<char>(pins & 0xff));
     bufferWrite->append(static_cast<char>(pins >> 8));
+    mutex->unlock();
     flushWrite();
 }
 
@@ -391,17 +398,21 @@ void MPSSE::setTristate(uint16_t pins)
 void MPSSE::readBits(char length)
 {
     length -= 1;
+    mutex->lock();
     bufferWrite->append(CLOCK_BITS_IN_POS_EDGE_MSB);
     bufferWrite->append(length);
     bufferWrite->append(static_cast<char>(SEND_IMMEDIATE));	//Flush read data back to PC.
+    mutex->unlock();
 }
 
 void MPSSE::writeBits(char length, char data)
 {
     length -= 1;
+    mutex->lock();
     bufferWrite->append(CLOCK_BITS_OUT_POS_EDGE_MSB);
     bufferWrite->append(length);
     bufferWrite->append(data);
+    mutex->unlock();
 }
 
 void MPSSE::stop()
@@ -410,15 +421,15 @@ void MPSSE::stop()
         setGPIOState(DO, OUT, LOW);
         setGPIOState(SK, OUT, LOW);
 
-        for (int i = 0; i < 4; i++) {
+//        for (int i = 0; i < 4; i++) {
             setGPIOState(DO, OUT, LOW);
             setGPIOState(SK, OUT, HIGH);
-        }
+//        }
 
-        for (int i = 0; i < 4; i++) {
+//        for (int i = 0; i < 4; i++) {
             setGPIOState(DO, OUT, HIGH);
             setGPIOState(SK, OUT, HIGH);
-        }
+//        }
     }
     setGPIOState(CS, OUT, HIGH);
 }
@@ -452,7 +463,9 @@ char MPSSE::readByteWithAck(bool ack)
     setGPIOState(DO, IN, LOW);
     readBytes(1);
     sendAck(ack);
+    mutex->lock();
     bufferWrite->append(static_cast<char>(SEND_IMMEDIATE));	//Flush read data back to PC.
+    mutex->unlock();
     flushWrite();
     return rawRead(1).at(0);
 }
@@ -461,7 +474,6 @@ char MPSSE::readByteWithAck(bool ack)
 int MPSSE::writeRegs(char address, char reg, QByteArray data)
 {
     int ret = 0;
-    bool isAcked;
 
     if (mode == I2C) {
         start();
@@ -481,7 +493,9 @@ int MPSSE::writeRegs(char address, char reg, QByteArray data)
         }
         stop();
         flushWrite();
+        mutex->unlock();
     }
+    return 0;
 
 stop_return:
     stop();
@@ -516,7 +530,6 @@ int MPSSE::readRegs(char address, char reg, char length, QByteArray &array)
 
     stop();
     return 0;
-
 stop_return:
     stop();
     return ret;

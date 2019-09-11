@@ -5,6 +5,7 @@
 #include <libftdi1/ftdi.h>
 
 #include <QByteArray>
+#include <QMutex>
 
 #define MPSSE_OK		0
 #define MPSSE_FAIL		-1
@@ -161,6 +162,11 @@ enum GPIO_MODE {
     OUT,
 };
 
+enum GPIO_HIGH_LOW {
+    GPIO_LOW,
+    GPIO_HIGH,
+};
+
 #define CLOCK_BYTES_OUT_POS_EDGE_MSB	0x10
 #define CLOCK_BYTES_OUT_NEG_EDGE_MSB	0x11
 #define CLOCK_BYTES_IN_POS_EDGE_MSB		0x20
@@ -177,25 +183,20 @@ public:
     MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, Interface interface);
     bool open();
     void close();
-    void start();
-    void stop();
 
     bool getIsOpened() const;
 
     void flushWrite();
     void setGPIOState(GPIO_PINS pin, GPIO_MODE gpioMode, GPIO_STATE state);
-    void writeBytes(QByteArray buffer);
     void setCSIdleState(GPIO_STATE idle);
     int gpioWrite(int pin, int direction);
-    void readBits(char length);
-    bool writeByteWithAck(char data);
     int writeRegs(char address, char reg, QByteArray data);
-    char readByteWithAck(bool ack);
     int readRegs(char address, char reg, char len, QByteArray &array);
-    void readBytes(int length);
     void setTristate(uint16_t pins);
     QList<char> detectDevices();
 private:
+    void start();
+    void stop();
     void flushAfterRead(int tf);
     void setTimeouts(int timeout);
     QByteArray rawRead(int size);
@@ -205,7 +206,12 @@ private:
     uint32_t div2freq(uint32_t system_clock, uint16_t div);
     int setLoopback(int enable);
     int setMode();
+    bool writeByteWithAck(char data);
+    char readByteWithAck(bool ack);
     int setBitsHigh(int port);
+    void writeBytes(QByteArray buffer);
+    void readBytes(int length);
+    void readBits(char length);
 private:
     struct ftdi_context ftdi;
     int flush_after_read;
@@ -239,6 +245,8 @@ private:
     QByteArray internalRead(int size);
 
     QByteArray *bufferWrite;
+    QMutex *mutex;
+    bool gpioUpdateHigh, gpioUpdateLow;
     char directionHigh, directionLow;
     char outputHigh, outputLow;
     void clockBytesOut(QByteArray buffer);

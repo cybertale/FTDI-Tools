@@ -95,13 +95,16 @@ void OLED::printChar(int x, int y, char chr)
 
 void OLED::printString(int x, int y, const QString &str)
 {
-    const char *data = str.toUtf8().constData();
+    QByteArray data = str.toUtf8();
     unsigned char j=0;
-    for (int i = 0; i < str.count(); i++) {
-        printChar(x, y, data[i]);
-        x+=8;
-        if(x>120){x=0;y+=2;}
-            j++;
+    for (int i = 0; i < data.count(); i++) {
+        printChar(x, y, data.at(i));
+        x += 8;
+        if(x > 120) {
+            x = 0;
+            y += 2;
+        }
+        j++;
     }
 }
 
