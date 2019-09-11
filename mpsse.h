@@ -98,7 +98,7 @@ enum i2c_ack
     ACK  = 0,
     NACK = 1
 };
-class LibMPSSE
+class MPSSE
 {
 public:
 /* Supported MPSSE modes */
@@ -171,8 +171,10 @@ enum GPIO_MODE {
 #define I2C_WRITE_ADDR(addr)		(addr << 1)
 #define I2C_READ_ADDR(addr)			((addr << 1) | 1)
 
+#define SET_IO_TRISTATE					0x9e
+
 public:
-    LibMPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, Interface interface);
+    MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, Interface interface);
     bool open();
     void close();
     void start();
@@ -191,6 +193,8 @@ public:
     char readByteWithAck(bool ack);
     int readRegs(char address, char reg, char len, QByteArray &array);
     void readBytes(int length);
+    void setTristate(uint16_t pins);
+    QList<char> detectDevices();
 private:
     void flushAfterRead(int tf);
     void setTimeouts(int timeout);

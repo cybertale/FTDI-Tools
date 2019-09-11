@@ -1,9 +1,8 @@
-﻿#include "libmpsse.h"
+﻿#include "mpsse.h"
 
-#include <cstdlib>
-#include <cstring>
+#include <QList>
 
-LibMPSSE::LibMPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, Interface interface)
+MPSSE::MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, Interface interface)
     : vid(vid)
     , pid(pid)
     , mode(mode)
@@ -37,12 +36,12 @@ LibMPSSE::LibMPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endian
 //            { 0, 0, NULL }
 //};
 
-//bool LibMPSSE::open()
+//bool MPSSE::open()
 //{
 //    return openIndex(vid, pid, mode, frequency, endianess, interface, nullptr, nullptr, 0);
 //}
 
-int LibMPSSE::setLoopback(int enable)
+int MPSSE::setLoopback(int enable)
 {
     QByteArray buf;
     int retval = MPSSE_FAIL;
@@ -54,11 +53,11 @@ int LibMPSSE::setLoopback(int enable)
 
     retval = rawWrite(buf);
 
-        return retval;
+    return retval;
 }
 
 /* Write data to the FTDI chip */
-int LibMPSSE::rawWrite(QByteArray buf)
+int MPSSE::rawWrite(QByteArray buf)
 {
     int retval = MPSSE_FAIL;
     unsigned char bufSend[buf.count()];
@@ -73,16 +72,7 @@ int LibMPSSE::rawWrite(QByteArray buf)
     return retval;
 }
 
-/*
- * Sets the appropriate transmit and receive commands based on the requested mode and byte order.
- *
- * @mpsse     - MPSSE context pointer.
- * @endianess - MPSSE_MSB or MPSSE_LSB.
- *
- * Returns MPSSE_OK on success.
- * Returns MPSSE_FAIL on failure.
- */
-int LibMPSSE::setMode()
+int MPSSE::setMode()
 {
     int retval = MPSSE_OK, setup_commands_size = 0;
     QByteArray setup_commands;
@@ -124,18 +114,18 @@ int LibMPSSE::setMode()
     return retval;
 }
 /* Convert a frequency to a clock divisor */
-uint16_t LibMPSSE::freq2div(uint32_t system_clock, uint32_t freq)
+uint16_t MPSSE::freq2div(uint32_t system_clock, uint32_t freq)
 {
     return (((system_clock / freq) / 2) - 1);
 }
 /* Convert a clock divisor to a frequency */
-uint32_t LibMPSSE::div2freq(uint32_t system_clock, uint16_t div)
+uint32_t MPSSE::div2freq(uint32_t system_clock, uint16_t div)
 {
     return (system_clock / ((1 + div) * 2));
 }
 
 /* Read data from the FTDI chip */
-QByteArray LibMPSSE::rawRead(int size)
+QByteArray MPSSE::rawRead(int size)
 {
     int n = 0, r = 0;
     unsigned char buf[size];
@@ -148,16 +138,6 @@ QByteArray LibMPSSE::rawRead(int size)
             if(r < 0) break;
             n += r;
         }
-
-        if(flush_after_read)
-        {
-            /*
-             * Make sure the buffers are cleared after a read or subsequent reads may fail.
-             *
-             * Is this needed anymore? It slows down repetitive read operations by ~8%.
-             */
-            ftdi_usb_purge_rx_buffer(&ftdi);
-        }
     }
 
     QByteArray array;
@@ -168,7 +148,7 @@ QByteArray LibMPSSE::rawRead(int size)
 }
 
 /* Sets the read and write timeout periods for bulk usb data transfers. */
-void LibMPSSE::setTimeouts(int timeout)
+void MPSSE::setTimeouts(int timeout)
 {
     if(mode)
     {
@@ -177,16 +157,7 @@ void LibMPSSE::setTimeouts(int timeout)
     }
 }
 
-/*
- * Sets the appropriate divisor for the desired clock frequency.
- *
- * @mpsse - MPSSE context pointer.
- * @freq  - Desired clock frequency in hertz.
- *
- * Returns MPSSE_OK on success.
- * Returns MPSSE_FAIL on failure.
- */
-int LibMPSSE::setClock(uint32_t freq)
+int MPSSE::setClock(uint32_t freq)
 {
     int retval = MPSSE_FAIL;
     uint32_t system_clock = 0;
@@ -231,42 +202,10 @@ int LibMPSSE::setClock(uint32_t freq)
     return retval;
 }
 
-/*
- * Enables or disables flushing of the FTDI chip's RX buffers after each read operation.
- * Flushing is disable by default.
- *
- * @mpsse - MPSSE context pointer.
- * @tf    - Set to 1 to enable flushing, or 0 to disable flushing.
- *
- * Returns void.
- */
-void LibMPSSE::flushAfterRead(int tf)
-{
-    flush_after_read = tf;
-    return;
-}
-
-/*
- * Open device by VID/PID/index
- *
- * @vid         - Device vendor ID.
- * @pid         - Device product ID.
- * @mode        - MPSSE mode, one of enum modes.
- * @freq        - Clock frequency to use for the specified mode.
- * @endianess   - Specifies how data is clocked in/out (MSB, LSB).
- * @interface   - FTDI interface to use (IFACE_A - IFACE_D).
- * @description - Device product description (set to NULL if not needed).
- * @serial      - Device serial number (set to NULL if not needed).
- * @index       - Device index (set to 0 if not needed).
- *
- * Returns a pointer to an MPSSE context structure.
- * On success, open will be set to 1.
- * On failure, open will be set to 0.
- */
-bool LibMPSSE::open()
+bool MPSSE::open()
 {
         /* Legacy; flushing is no longer needed, so disable it by default. */
-        flushAfterRead(0);
+//        flushAfterRead(0);
 
         /* ftdilib initialization */
         if(ftdi_init(&ftdi) == 0)
@@ -333,12 +272,12 @@ bool LibMPSSE::open()
     return 0;
 }
 
-bool LibMPSSE::getIsOpened() const
+bool MPSSE::getIsOpened() const
 {
     return isOpened;
 }
 
-void LibMPSSE::close()
+void MPSSE::close()
 {
     if(isOpened)
     {
@@ -351,12 +290,12 @@ void LibMPSSE::close()
     return;
 }
 
-void LibMPSSE::setCSIdleState(GPIO_STATE state)
+void MPSSE::setCSIdleState(GPIO_STATE state)
 {
     idleCS = state;
 }
 
-void LibMPSSE::setGPIOState(GPIO_PINS pin, GPIO_MODE gpioMode, GPIO_STATE state)
+void MPSSE::setGPIOState(GPIO_PINS pin, GPIO_MODE gpioMode, GPIO_STATE state)
 {
     char *pMode = &directionLow;
     char *pData = &outputLow;
@@ -385,7 +324,7 @@ void LibMPSSE::setGPIOState(GPIO_PINS pin, GPIO_MODE gpioMode, GPIO_STATE state)
     bufferWrite->append(*pMode);
 }
 
-void LibMPSSE::start()
+void MPSSE::start()
 {
     setGPIOState(CS, OUT, LOW);
     if (mode == I2C) {
@@ -402,21 +341,19 @@ void LibMPSSE::start()
         setGPIOState(DO, OUT, LOW);
         setGPIOState(SK, OUT, LOW);
     }
-
-    //Pin idle state.
 }
 
-void LibMPSSE::writeBytes(QByteArray buffer)
+void MPSSE::writeBytes(QByteArray buffer)
 {
     clockBytesOut(buffer);
 }
 
-void LibMPSSE::readBytes(int length)
+void MPSSE::readBytes(int length)
 {
     clockBytesIn(length);
 }
 
-void LibMPSSE::clockBytesOut(QByteArray buffer)
+void MPSSE::clockBytesOut(QByteArray buffer)
 {
     //TODO mode MSB/LSB POS/NEG
     bufferWrite->append(CLOCK_BYTES_OUT_NEG_EDGE_MSB);
@@ -427,7 +364,7 @@ void LibMPSSE::clockBytesOut(QByteArray buffer)
         bufferWrite->append(buffer.at(i));
 }
 
-void LibMPSSE::clockBytesIn(int length)
+void MPSSE::clockBytesIn(int length)
 {
     length -= 1;
     bufferWrite->append(CLOCK_BYTES_IN_POS_EDGE_MSB);
@@ -436,14 +373,22 @@ void LibMPSSE::clockBytesIn(int length)
     bufferWrite->append(static_cast<char>(SEND_IMMEDIATE));
 }
 
-void LibMPSSE::flushWrite()
+void MPSSE::flushWrite()
 {
     rawWrite(*bufferWrite);
     bufferWrite->clear();
 }
 
+void MPSSE::setTristate(uint16_t pins)
+{
+    bufferWrite->append(static_cast<char>(SET_IO_TRISTATE));
+    bufferWrite->append(static_cast<char>(pins & 0xff));
+    bufferWrite->append(static_cast<char>(pins >> 8));
+    flushWrite();
+}
+
 //length here belongs to 0-7, corresponding to 1-8 bits.
-void LibMPSSE::readBits(char length)
+void MPSSE::readBits(char length)
 {
     length -= 1;
     bufferWrite->append(CLOCK_BITS_IN_POS_EDGE_MSB);
@@ -451,7 +396,7 @@ void LibMPSSE::readBits(char length)
     bufferWrite->append(static_cast<char>(SEND_IMMEDIATE));	//Flush read data back to PC.
 }
 
-void LibMPSSE::writeBits(char length, char data)
+void MPSSE::writeBits(char length, char data)
 {
     length -= 1;
     bufferWrite->append(CLOCK_BITS_OUT_POS_EDGE_MSB);
@@ -459,7 +404,7 @@ void LibMPSSE::writeBits(char length, char data)
     bufferWrite->append(data);
 }
 
-void LibMPSSE::stop()
+void MPSSE::stop()
 {
     if (mode == I2C) {
         setGPIOState(DO, OUT, LOW);
@@ -476,17 +421,15 @@ void LibMPSSE::stop()
         }
     }
     setGPIOState(CS, OUT, HIGH);
-
-    //pin idle state.
 }
 
-bool LibMPSSE::writeByteWithAck(char data)
+bool MPSSE::writeByteWithAck(char data)
 {
     setGPIOState(DO, OUT, LOW);
     writeBytes(QByteArray().append(data));
-    setGPIOState(SK, OUT, LOW);
-    setGPIOState(DO, IN, HIGH);
-    setGPIOState(DI, IN, HIGH);
+//    setGPIOState(SK, OUT, LOW);
+    setGPIOState(DO, IN, LOW);
+    setGPIOState(DI, IN, LOW);
     readBits(1);	//Read ack.
     flushWrite();
     QByteArray ack = rawRead(1);
@@ -496,7 +439,7 @@ bool LibMPSSE::writeByteWithAck(char data)
     return true;
 }
 
-void LibMPSSE::sendAck(bool send)
+void MPSSE::sendAck(bool send)
 {
     if (send)
         writeBits(1, static_cast<char>(0x80));
@@ -504,7 +447,7 @@ void LibMPSSE::sendAck(bool send)
         writeBits(1, static_cast<char>(0x00));
 }
 
-char LibMPSSE::readByteWithAck(bool ack)
+char MPSSE::readByteWithAck(bool ack)
 {
     setGPIOState(DO, IN, LOW);
     readBytes(1);
@@ -515,7 +458,7 @@ char LibMPSSE::readByteWithAck(bool ack)
 }
 
 //-1 for no ack.
-int LibMPSSE::writeRegs(char address, char reg, QByteArray data)
+int MPSSE::writeRegs(char address, char reg, QByteArray data)
 {
     int ret = 0;
     bool isAcked;
@@ -546,7 +489,7 @@ stop_return:
     return ret;
 }
 
-int LibMPSSE::readRegs(char address, char reg, char length, QByteArray &array)
+int MPSSE::readRegs(char address, char reg, char length, QByteArray &array)
 {
     int ret;
     array.clear();
@@ -577,4 +520,19 @@ int LibMPSSE::readRegs(char address, char reg, char length, QByteArray &array)
 stop_return:
     stop();
     return ret;
+}
+
+QList<char> MPSSE::detectDevices()
+{
+    QList<char> listDevices = QList<char>();
+    for (int i = 0; i < 128; i++) {
+        start();
+        bool ack = writeByteWithAck(static_cast<char>(i << 1));
+        stop();
+        flushWrite();
+        if (ack)
+            listDevices.append(static_cast<char>(i));
+    }
+
+    return listDevices;
 }

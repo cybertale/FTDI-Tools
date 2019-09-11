@@ -16,13 +16,15 @@ DEFINES += QT_DEPRECATED_WARNINGS
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += \
-    libmpsse.cpp \
     main.cpp \
-    mainwindow.cpp
+    mainwindow.cpp \
+    mpsse.cpp \
+    oled.cpp
 
 HEADERS += \
-    libmpsse.h \
-    mainwindow.h
+    mainwindow.h \
+    mpsse.h \
+    oled.h
 
 FORMS += \
     mainwindow.ui

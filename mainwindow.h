@@ -3,7 +3,8 @@
 
 #include <QMainWindow>
 
-#include "libmpsse.h"
+#include "mpsse.h"
+#include "oled.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -23,6 +24,7 @@ private:
 
 private:
     Ui::MainWindow *ui;
-    LibMPSSE *libMPSSE;
+    MPSSE *mpsse;
+    OLED *oled;
 };
 #endif // MAINWINDOW_H
