@@ -26,8 +26,6 @@
 #define MAX_SETUP_COMMANDS	10
 #define SS_TX_COUNT		3
 
-#define LOW			0
-#define HIGH			1
 #define NUM_GPIOL_PINS		4
 #define NUM_GPIO_PINS		12
 
@@ -130,18 +128,27 @@ enum Interface
 
 enum GPIO_PINS
 {
-    GPIOL0 = 0,
-    GPIOL1 = 1,
-    GPIOL2 = 2,
-    GPIOL3 = 3,
-    GPIOH0 = 4,
-    GPIOH1 = 5,
-    GPIOH2 = 6,
-    GPIOH3 = 7,
-    GPIOH4 = 8,
-    GPIOH5 = 9,
-    GPIOH6 = 10,
-    GPIOH7 = 11
+    SK,
+    DO,
+    DI,
+    CS,
+    GPIOL0,
+    GPIOL1,
+    GPIOL2,
+    GPIOL3,
+    GPIOH0,
+    GPIOH1,
+    GPIOH2,
+    GPIOH3,
+    GPIOH4,
+    GPIOH5,
+    GPIOH6,
+    GPIOH7,
+};
+
+enum GPIO_STATE {
+    LOW,
+    HIGH,
 };
 
 enum ENDIANESS {
@@ -149,23 +156,42 @@ enum ENDIANESS {
     LSB = 0x08,
 };
 
+enum GPIO_MODE {
+    IN,
+    OUT,
+};
+
+#define CLOCK_BYTES_OUT_POS_EDGE_MSB	0x10
+#define CLOCK_BYTES_OUT_NEG_EDGE_MSB	0x11
+#define CLOCK_BYTES_IN_POS_EDGE_MSB		0x20
+#define CLOCK_BYTES_IN_NEG_EDGE_MSB		0x24
+#define CLOCK_BITS_OUT_POS_EDGE_MSB		0x12
+#define CLOCK_BITS_IN_POS_EDGE_MSB		0x22
+
+#define I2C_WRITE_ADDR(addr)		(addr << 1)
+#define I2C_READ_ADDR(addr)			((addr << 1) | 1)
+
 public:
     LibMPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, Interface interface);
     bool open();
-    int pinHigh(GPIO_PINS pin);
-    int pinLow(GPIO_PINS pin);
     void close();
-
-    void setCSIdleState(int idle);
     void start();
-    int write(QByteArray data);
-    QByteArray read(int size);
-    int stop();
+    void stop();
 
     bool getIsOpened() const;
 
+    void flushWrite();
+    void setGPIOState(GPIO_PINS pin, GPIO_MODE gpioMode, GPIO_STATE state);
+    void writeBytes(QByteArray buffer);
+    void setCSIdleState(GPIO_STATE idle);
+    int gpioWrite(int pin, int direction);
+    void readBits(char length);
+    bool writeByteWithAck(char data);
+    int writeRegs(char address, char reg, QByteArray data);
+    char readByteWithAck(bool ack);
+    int readRegs(char address, char reg, char len, QByteArray &array);
+    void readBytes(int length);
 private:
-    bool openIndex(int vid, int pid, modes mode, int freq, ENDIANESS endianess, Interface interface, const char *description, const char *serial, int index);
     void flushAfterRead(int tf);
     void setTimeouts(int timeout);
     QByteArray rawRead(int size);
@@ -174,13 +200,8 @@ private:
     uint16_t freq2div(uint32_t system_clock, uint32_t freq);
     uint32_t div2freq(uint32_t system_clock, uint16_t div);
     int setLoopback(int enable);
-    int setMode(ENDIANESS endianess);
-    int setBitsLow(int port);
-    void setAck(int ack);
-    void sendAcks();
-    int gpioWrite(int pin, int direction);
+    int setMode();
     int setBitsHigh(int port);
-
 private:
     struct ftdi_context ftdi;
     int flush_after_read;
@@ -202,6 +223,8 @@ private:
     uint8_t tack;
     uint8_t rack;
 
+    GPIO_STATE idleCS;
+
     int vid;
     int pid;
     modes mode;
@@ -210,6 +233,14 @@ private:
     Interface interface;
     QByteArray build_block_buffer(uint8_t cmd, QByteArray data);
     QByteArray internalRead(int size);
+
+    QByteArray *bufferWrite;
+    char directionHigh, directionLow;
+    char outputHigh, outputLow;
+    void clockBytesOut(QByteArray buffer);
+    void clockBytesIn(int length);
+    void writeBits(char length, char data);
+    void sendAck(bool send);
 };
 
 #endif // MPSSE_H
