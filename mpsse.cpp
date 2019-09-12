@@ -3,7 +3,8 @@
 #include <QList>
 
 MPSSE::MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, Interface interface)
-    : vid(vid)
+    : QObject ()
+    , vid(vid)
     , pid(pid)
     , mode(mode)
     , frequency(frequency)
@@ -11,6 +12,10 @@ MPSSE::MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, I
     , interface(interface)
     , bufferWrite(new QByteArray())
     , mutex(new QMutex())
+    , timerUpdateGPIO(new QBasicTimer())
+    , gpioRefreshHigh(0)
+    , gpioRefreshLow(0)
+    , refreshInterval(5)
     , directionHigh(0)
     , directionLow(0)
     , outputHigh(0)
@@ -45,22 +50,17 @@ MPSSE::MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, I
 int MPSSE::setLoopback(int enable)
 {
     QByteArray buf;
-    int retval = MPSSE_FAIL;
 
     if(enable)
-        buf.append(LOOPBACK_START);
+        buf.append(static_cast<char>(LOOPBACK_START));
     else
-        buf.append(LOOPBACK_END);
+        buf.append(static_cast<char>(LOOPBACK_END));
 
-    retval = rawWrite(buf);
-
-    return retval;
+    return rawWrite(buf);
 }
 
-/* Write data to the FTDI chip */
 int MPSSE::rawWrite(QByteArray buf)
 {
-    int retval = MPSSE_FAIL;
     unsigned char bufSend[buf.count()];
 
     for (int i = 0; i < buf.count(); i++)
@@ -68,14 +68,14 @@ int MPSSE::rawWrite(QByteArray buf)
 
     if(mode)
         if(ftdi_write_data(&ftdi, bufSend, buf.count()) == buf.count())
-            retval = MPSSE_OK;
+            return -1;
 
-    return retval;
+    return 0;
 }
 
 int MPSSE::setMode()
 {
-    int retval = MPSSE_OK, setup_commands_size = 0;
+    int ret = 0, setup_commands_size = 0;
     QByteArray setup_commands;
     QByteArray buf;
 
@@ -102,17 +102,17 @@ int MPSSE::setMode()
         case GPIO:
             break;
         default:
-            retval = MPSSE_FAIL;
+            ret = -1;
     }
 
     /* Send any setup commands to the chip */
-    if(retval == MPSSE_OK && setup_commands_size > 0)
-        retval = rawWrite(setup_commands);
+    if(ret == 0 && setup_commands_size > 0)
+        ret = rawWrite(setup_commands);
 
-    if(retval == MPSSE_OK)
-        retval = rawWrite(buf);
+    if(ret == 0)
+        ret = rawWrite(buf);
 
-    return retval;
+    return ret;
 }
 /* Convert a frequency to a clock divisor */
 uint16_t MPSSE::freq2div(uint32_t system_clock, uint32_t freq)
@@ -160,7 +160,7 @@ void MPSSE::setTimeouts(int timeout)
 
 int MPSSE::setClock(uint32_t freq)
 {
-    int retval = MPSSE_FAIL;
+    int ret = -1;
     uint32_t system_clock = 0;
     uint16_t divisor = 0;
     QByteArray buf;
@@ -177,7 +177,7 @@ int MPSSE::setClock(uint32_t freq)
         system_clock = TWELVE_MHZ;
     }
 
-    if(rawWrite(buf) == MPSSE_OK)
+    if(!rawWrite(buf))
     {
         if(freq <= 0)
         {
@@ -193,28 +193,21 @@ int MPSSE::setClock(uint32_t freq)
         buf.append(divisor & 0xFF);
         buf.append((divisor >> 8) & 0xFF);
 
-        if(rawWrite(buf) == MPSSE_OK)
+        if(!rawWrite(buf))
         {
             clock = div2freq(system_clock, divisor);
-            retval = MPSSE_OK;
+            ret = 0;
         }
     }
 
-    return retval;
+    return ret;
 }
 
 bool MPSSE::open()
 {
-        /* Legacy; flushing is no longer needed, so disable it by default. */
-//        flushAfterRead(0);
-
-        /* ftdilib initialization */
         if(ftdi_init(&ftdi) == 0)
         {
-            /* Set the FTDI interface  */
             ftdi_set_interface(&ftdi, static_cast<enum ftdi_interface>(interface));
-
-            /* Open the specified device */
             if(ftdi_usb_open_desc_index(&ftdi, vid, pid, nullptr, nullptr, 0) == 0)
             {
                 int ret = 0;
@@ -241,9 +234,9 @@ bool MPSSE::open()
                     {
                         ftdi_set_bitmode(&ftdi, 0, BITMODE_MPSSE);
 
-                        if(setClock(static_cast<uint32_t>(frequency)) == MPSSE_OK)
+                        if(!setClock(static_cast<uint32_t>(frequency)))
                         {
-                            if(setMode() == MPSSE_OK)
+                            if(!setMode())
                             {
                                 /* Give the chip a few mS to initialize */
 //                                usleep(SETUP_DELAY);
@@ -287,13 +280,26 @@ void MPSSE::close()
         ftdi_deinit(&ftdi);
         isOpened = false;
     }
-
-    return;
 }
 
 void MPSSE::setCSIdleState(GPIO_STATE state)
 {
     idleCS = state;
+}
+
+char MPSSE::getGPIOState(GPIO_HIGH_LOW high_low)
+{
+    mutex->lock();
+    if (high_low == GPIO_LOW)
+        bufferWrite->append(static_cast<char>(READ_GPIO_LOW));
+    else if (high_low == GPIO_HIGH)
+        bufferWrite->append(static_cast<char>(READ_GPIO_HIGH));
+
+    bufferWrite->append(static_cast<char>(SEND_IMMEDIATE));
+    mutex->unlock();
+    flushWrite();
+    QByteArray data = rawRead(1);
+    return data.at(0);
 }
 
 void MPSSE::setGPIOState(GPIO_PINS pin, GPIO_MODE gpioMode, GPIO_STATE state)
@@ -421,15 +427,11 @@ void MPSSE::stop()
         setGPIOState(DO, OUT, LOW);
         setGPIOState(SK, OUT, LOW);
 
-//        for (int i = 0; i < 4; i++) {
-            setGPIOState(DO, OUT, LOW);
-            setGPIOState(SK, OUT, HIGH);
-//        }
+        setGPIOState(DO, OUT, LOW);
+        setGPIOState(SK, OUT, HIGH);
 
-//        for (int i = 0; i < 4; i++) {
-            setGPIOState(DO, OUT, HIGH);
-            setGPIOState(SK, OUT, HIGH);
-//        }
+        setGPIOState(DO, OUT, HIGH);
+        setGPIOState(SK, OUT, HIGH);
     }
     setGPIOState(CS, OUT, HIGH);
 }
@@ -456,6 +458,11 @@ void MPSSE::sendAck(bool send)
         writeBits(1, static_cast<char>(0x80));
     else
         writeBits(1, static_cast<char>(0x00));
+}
+
+void MPSSE::setRefreshInterval(int value)
+{
+    refreshInterval = value;
 }
 
 char MPSSE::readByteWithAck(bool ack)
@@ -548,4 +555,44 @@ QList<char> MPSSE::detectDevices()
     }
 
     return listDevices;
+}
+
+void MPSSE::timerEvent(QTimerEvent *event)
+{
+    if (event->timerId() == timerUpdateGPIO->timerId()) {
+        if (gpioRefreshLow) {
+            inputStateLow = getGPIOState(GPIO_LOW);
+            char bitsChanged = inputStateLow ^ inputStateLowLast;
+            if (bitsChanged != 0x00) {
+                emit gpioStateChanged(GPIO_LOW, inputStateLow);
+                inputStateLowLast = inputStateLow;
+            }
+        }
+        if (gpioRefreshHigh) {
+            inputStateHigh = getGPIOState(GPIO_HIGH);
+            char bitsChanged = inputStateHigh ^ inputStateHighLast;
+            if (bitsChanged != 0x00) {
+                emit gpioStateChanged(GPIO_HIGH, inputStateHigh);
+                inputStateHighLast = inputStateHigh;
+            }
+        }
+    }
+    QObject::timerEvent(event);
+}
+
+void MPSSE::setGPIORefresh(GPIO_HIGH_LOW high_low, bool enable)
+{
+    bool oldRefreshHigh = gpioRefreshHigh, oldRefreshLow = gpioRefreshLow;
+
+    if (high_low == GPIO_LOW)
+        gpioRefreshLow = enable;
+    if (high_low == GPIO_HIGH)
+        gpioRefreshHigh = enable;
+
+    //If none was enabled and some one is enabled.
+    if (!oldRefreshLow && !oldRefreshHigh && enable)
+        timerUpdateGPIO->start(refreshInterval, this);
+    //Someone was enabled while no one is enabled now.
+    if ((oldRefreshLow || oldRefreshHigh) && (!gpioRefreshLow && !gpioRefreshHigh))
+        timerUpdateGPIO->stop();
 }

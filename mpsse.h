@@ -4,11 +4,10 @@
 #include <stdint.h>
 #include <libftdi1/ftdi.h>
 
+#include <QBasicTimer>
 #include <QByteArray>
 #include <QMutex>
-
-#define MPSSE_OK		0
-#define MPSSE_FAIL		-1
+#include <QObject>
 
 #define CHUNK_SIZE		65535
 #define SPI_RW_SIZE		(63 * 1024)
@@ -29,18 +28,6 @@
 
 #define NUM_GPIOL_PINS		4
 #define NUM_GPIO_PINS		12
-
-#define NULL_CONTEXT_ERROR_MSG	"NULL MPSSE context pointer!"
-
-struct vid_pid
-{
-    int vid;
-    int pid;
-    char *description;
-};
-
-#define DEFAULT_TRIS            (SK | DO | CS | GPIO0 | GPIO1 | GPIO2 | GPIO3)  /* SK/DO/CS and GPIOs are outputs, DI is an input */
-#define DEFAULT_PORT            (SK | CS)       				/* SK and CS are high, all others low */
 
 enum mpsse_commands
 {
@@ -99,8 +86,10 @@ enum i2c_ack
     ACK  = 0,
     NACK = 1
 };
-class MPSSE
+class MPSSE : public QObject
 {
+    Q_OBJECT
+
 public:
 /* Supported MPSSE modes */
 enum modes
@@ -114,9 +103,6 @@ enum modes
     BITBANG = 7,
 };
 
-struct mpsse_context
-{
-};
 /* FTDI interfaces */
 enum Interface
 {
@@ -179,8 +165,12 @@ enum GPIO_HIGH_LOW {
 
 #define SET_IO_TRISTATE					0x9e
 
+#define READ_GPIO_LOW					0x81
+#define READ_GPIO_HIGH					0x83
+
 public:
     MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, Interface interface);
+    ~MPSSE() {}
     bool open();
     void close();
 
@@ -194,6 +184,17 @@ public:
     int readRegs(char address, char reg, char len, QByteArray &array);
     void setTristate(uint16_t pins);
     QList<char> detectDevices();
+    char getGPIOState(GPIO_HIGH_LOW high_low);
+    void setGPIORefresh(GPIO_HIGH_LOW high_low, bool enable);
+    void setRefreshInterval(int value);
+
+signals:
+    void gpioStateChanged(GPIO_HIGH_LOW high_low, char pins);
+
+    // QObject interface
+protected:
+    void timerEvent(QTimerEvent *event);
+
 private:
     void start();
     void stop();
@@ -212,6 +213,11 @@ private:
     void writeBytes(QByteArray buffer);
     void readBytes(int length);
     void readBits(char length);
+    void clockBytesOut(QByteArray buffer);
+    void clockBytesIn(int length);
+    void writeBits(char length, char data);
+    void sendAck(bool send);
+
 private:
     struct ftdi_context ftdi;
     int flush_after_read;
@@ -246,13 +252,13 @@ private:
 
     QByteArray *bufferWrite;
     QMutex *mutex;
-    bool gpioUpdateHigh, gpioUpdateLow;
+    QBasicTimer *timerUpdateGPIO;
+    bool gpioRefreshHigh, gpioRefreshLow;
+    char inputStateHighLast, inputStateLowLast;
+    char inputStateHigh, inputStateLow;
+    int refreshInterval;
     char directionHigh, directionLow;
     char outputHigh, outputLow;
-    void clockBytesOut(QByteArray buffer);
-    void clockBytesIn(int length);
-    void writeBits(char length, char data);
-    void sendAck(bool send);
 };
 
 #endif // MPSSE_H
