@@ -1,7 +1,7 @@
 ﻿#include "oled.h"
 #include <QThread>
 
-OLED::OLED(MPSSE *mpsse)
+OLED::OLED(MPSSE_I2C *mpsse)
     : mpsse(mpsse)
     , size(FONT6x8)
 {

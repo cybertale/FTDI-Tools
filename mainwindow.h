@@ -4,7 +4,8 @@
 #include <QBasicTimer>
 #include <QMainWindow>
 
-#include "mpsse.h"
+#include "mpsse_i2c.h"
+#include "mpsse_spi.h"
 #include "oled.h"
 
 QT_BEGIN_NAMESPACE
@@ -32,7 +33,7 @@ private:
 
 private:
     Ui::MainWindow *ui;
-    MPSSE *mpsse;
+    MPSSE_I2C *mpsse;
     OLED *oled;
     QBasicTimer *timerUpdate;
 };

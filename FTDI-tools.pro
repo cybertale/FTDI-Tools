@@ -19,11 +19,15 @@ SOURCES += \
     main.cpp \
     mainwindow.cpp \
     mpsse.cpp \
+    mpsse_i2c.cpp \
+    mpsse_spi.cpp \
     oled.cpp
 
 HEADERS += \
     mainwindow.h \
     mpsse.h \
+    mpsse_i2c.h \
+    mpsse_spi.h \
     oled.h
 
 FORMS += \

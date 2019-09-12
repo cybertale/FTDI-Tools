@@ -2,8 +2,9 @@
 
 #include <QList>
 
-MPSSE::MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, Interface interface)
+MPSSE::MPSSE(int vid, int pid, MPSSE_MODE mode, int frequency, ENDIANESS endianess, INTERFACE interface)
     : QObject ()
+    , mutex(new QMutex())
     , idleCS(HIGH)
     , vid(vid)
     , pid(pid)
@@ -12,7 +13,6 @@ MPSSE::MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, I
     , endianess(endianess)
     , interface(interface)
     , bufferWrite(new QByteArray())
-    , mutex(new QMutex())
     , timerUpdateGPIO(new QBasicTimer())
     , gpioRefreshHigh(0)
     , gpioRefreshLow(0)
@@ -22,7 +22,7 @@ MPSSE::MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, I
     , outputHigh(0)
     , outputLow(0)
 {
-
+    setGPIOState(DO, OUT, LOW);
 }
 
 /* List of known FT2232-based devices */
@@ -33,11 +33,6 @@ MPSSE::MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, I
 
 //            { 0, 0, NULL }
 //};
-
-//bool MPSSE::open()
-//{
-//    return openIndex(vid, pid, mode, frequency, endianess, interface, nullptr, nullptr, 0);
-//}
 
 int MPSSE::setLoopback(int enable)
 {
@@ -58,9 +53,8 @@ int MPSSE::rawWrite(QByteArray buf)
     for (int i = 0; i < buf.count(); i++)
         bufSend[i] = static_cast<unsigned char>(buf.at(i));
 
-    if(mode)
-        if(ftdi_write_data(&ftdi, bufSend, buf.count()) == buf.count())
-            return -1;
+    if(ftdi_write_data(&ftdi, bufSend, buf.count()) == buf.count())
+        return -1;
 
     return 0;
 }
@@ -79,22 +73,12 @@ int MPSSE::setMode()
 
     switch(mode)
     {
-        case SPI0:
-            break;
-        case SPI3:
-            break;
-        case SPI1:
-            break;
-        case SPI2:
+        case SPI:
             break;
         case I2C:
             /* Enable three phase clock to ensure that I2C data is available on both the rising and falling clock edges */
             setup_commands.append(static_cast<char>(ENABLE_3_PHASE_CLOCK));
             break;
-        case GPIO:
-            break;
-        default:
-            ret = -1;
     }
 
     /* Send any setup commands to the chip */
@@ -123,14 +107,11 @@ QByteArray MPSSE::rawRead(int size)
     int n = 0, r = 0;
     unsigned char buf[size];
 
-    if(mode)
+    while(n < size)
     {
-        while(n < size)
-        {
-            r = ftdi_read_data(&ftdi, buf, size);
-            if(r < 0) break;
-            n += r;
-        }
+        r = ftdi_read_data(&ftdi, buf, size);
+        if(r < 0) break;
+        n += r;
     }
 
     QByteArray array;
@@ -143,11 +124,8 @@ QByteArray MPSSE::rawRead(int size)
 /* Sets the read and write timeout periods for bulk usb data transfers. */
 void MPSSE::setTimeouts(int timeout)
 {
-    if(mode)
-    {
-        ftdi.usb_read_timeout = timeout;
-        ftdi.usb_write_timeout = timeout;
-    }
+    ftdi.usb_read_timeout = timeout;
+    ftdi.usb_write_timeout = timeout;
 }
 
 int MPSSE::setClock(uint32_t freq)
@@ -158,15 +136,15 @@ int MPSSE::setClock(uint32_t freq)
     QByteArray buf;
 
     /* Do not call is_valid_context() here, as the FTDI chip may not be completely configured when SetClock is called */
-    if(freq > SIX_MHZ)
+    if(freq > 6000000)
     {
         buf.append(TCK_X5);
-        system_clock = SIXTY_MHZ;
+        system_clock = 60000000;
     }
     else
     {
         buf.append(TCK_D5);
-        system_clock = TWELVE_MHZ;
+        system_clock = 12000000;
     }
 
     if(!rawWrite(buf))
@@ -203,13 +181,6 @@ bool MPSSE::open()
             if(ftdi_usb_open_desc_index(&ftdi, vid, pid, nullptr, nullptr, 0) == 0)
             {
                 int ret = 0;
-                status = STOPPED;
-
-                /* Set the appropriate transfer size for the requested protocol */
-                if(mode == I2C)
-                    xsize = I2C_TRANSFER_SIZE;
-                else
-                    xsize = SPI_RW_SIZE;
 
                 ret |= ftdi_usb_reset(&ftdi);
                 ret |= ftdi_set_latency_timer(&ftdi, LATENCY_MS);
@@ -222,8 +193,8 @@ bool MPSSE::open()
                     /* Set the read and write timeout periods */
                     setTimeouts(USB_TIMEOUT);
 
-                    if(mode != BITBANG)
-                    {
+//                    if(mode != BITBANG)
+//                    {
                         ftdi_set_bitmode(&ftdi, 0, BITMODE_MPSSE);
 
                         if(!setClock(static_cast<uint32_t>(frequency)))
@@ -240,15 +211,16 @@ bool MPSSE::open()
                                 ftdi_usb_purge_buffers(&ftdi);
                             }
                         }
-                    }
-                    else
-                    {
-                        /* Skip the setup functions if we're just operating in BITBANG mode */
-                        if(ftdi_set_bitmode(&ftdi, 0xFF, BITMODE_BITBANG) == 0)
-                        {
-                            isOpened = true;
-                        }
-                    }
+                        isOpened = true;
+//                    }
+//                    else
+//                    {
+//                        /* Skip the setup functions if we're just operating in BITBANG mode */
+//                        if(ftdi_set_bitmode(&ftdi, 0xFF, BITMODE_BITBANG) == 0)
+//                        {
+//                            isOpened = true;
+//                        }
+//                    }
                 }
             } else
                 return -1;
@@ -341,64 +313,18 @@ void MPSSE::disableCS()
 void MPSSE::start()
 {
     enableCS();
-    if (mode == I2C) {
-        setGPIOState(DO, OUT, HIGH);
-        setGPIOState(SK, OUT, HIGH);
-
-        setGPIOState(DO, OUT, LOW);
-        setGPIOState(SK, OUT, HIGH);
-
-        setGPIOState(DO, OUT, LOW);
-        setGPIOState(SK, OUT, LOW);
-    } else {
-        setGPIOState(SK, OUT, HIGH);
-        setGPIOState(DO, OUT, HIGH);
-        setGPIOState(DI, IN, HIGH);
-    }
 }
 
 void MPSSE::stop()
 {
-    if (mode == I2C) {
-        setGPIOState(DO, OUT, LOW);
-        setGPIOState(SK, OUT, LOW);
-
-        setGPIOState(DO, OUT, LOW);
-        setGPIOState(SK, OUT, HIGH);
-
-        setGPIOState(DO, OUT, HIGH);
-        setGPIOState(SK, OUT, HIGH);
-    } else {
-        setGPIOState(SK, OUT, HIGH);
-        setGPIOState(DO, OUT, HIGH);
-        setGPIOState(DI, IN, HIGH);
-    }
     disableCS();
-}
-
-QByteArray MPSSE::readWriteBytes(QByteArray buffer)
-{
-    //Only available in SPI modes.
-    clockBytesInOut(buffer);
-    flushWrite();
-    return rawRead(buffer.length());
-}
-
-void MPSSE::writeBytes(QByteArray buffer)
-{
-    clockBytesOut(buffer);
-}
-
-void MPSSE::readBytes(int length)
-{
-    clockBytesIn(length);
 }
 
 void MPSSE::clockBytesInOut(QByteArray buffer)
 {
     int length = buffer.count() - 1;
     mutex->lock();
-    bufferWrite->append(CLOCK_BYTES_IN_POS_OUT_NEG_MSB);
+    bufferWrite->append(cmdReadWriteBytes);
     bufferWrite->append(static_cast<char>(length & 0xff));
     bufferWrite->append(static_cast<char>(length >> 8));
     for (int i = 0; i < buffer.count(); i++)
@@ -411,7 +337,7 @@ void MPSSE::clockBytesOut(QByteArray buffer)
 {
     //TODO mode MSB/LSB POS/NEG
     mutex->lock();
-    bufferWrite->append(CLOCK_BYTES_OUT_NEG_EDGE_MSB);
+    bufferWrite->append(cmdWriteBytes);
     int length = buffer.count() - 1;
     bufferWrite->append(static_cast<char>(length & 0xff));
     bufferWrite->append(static_cast<char>(length >> 8));
@@ -424,7 +350,7 @@ void MPSSE::clockBytesIn(int length)
 {
     length -= 1;
     mutex->lock();
-    bufferWrite->append(CLOCK_BYTES_IN_POS_EDGE_MSB);
+    bufferWrite->append(cmdReadBytes);
     bufferWrite->append(static_cast<char>(length & 0xff));
     bufferWrite->append(static_cast<char>(length >> 8));
     bufferWrite->append(static_cast<char>(SEND_IMMEDIATE));
@@ -446,7 +372,6 @@ void MPSSE::setTristate(uint16_t pins)
     bufferWrite->append(static_cast<char>(pins & 0xff));
     bufferWrite->append(static_cast<char>(pins >> 8));
     mutex->unlock();
-    flushWrite();
 }
 
 //length here belongs to 0-7, corresponding to 1-8 bits.
@@ -470,122 +395,57 @@ void MPSSE::writeBits(char length, char data)
     mutex->unlock();
 }
 
-bool MPSSE::writeByteWithAck(char data)
+void MPSSE::setReadWriteInRising(bool rising)
 {
-    setGPIOState(DO, OUT, LOW);
-    writeBytes(QByteArray().append(data));
-//    setGPIOState(SK, OUT, LOW);
-    setGPIOState(DO, IN, LOW);
-    setGPIOState(DI, IN, LOW);
-    readBits(1);	//Read ack.
-    flushWrite();
-    QByteArray ack = rawRead(1);
-    if ((ack.at(0) & 0x01) == 0x01) {
-        return false;
+    if (rising) {
+        if (endianess == MSB)
+            cmdReadWriteBytes = CLOCK_BYTES_IN_POS_OUT_NEG_MSB;
+        else
+            cmdReadWriteBytes = CLOCK_BYTES_IN_POS_OUT_NEG_LSB;
     }
-    return true;
+    else {
+        if (endianess == MSB)
+            cmdReadWriteBytes = CLOCK_BYTES_IN_NEG_OUT_POS_MSB;
+        else
+            cmdReadWriteBytes = CLOCK_BYTES_IN_NEG_OUT_POS_LSB;
+    }
 }
 
-void MPSSE::sendAck(bool send)
+void MPSSE::setReadInRising(bool rising)
 {
-    if (send)
-        writeBits(1, static_cast<char>(0x80));
-    else
-        writeBits(1, static_cast<char>(0x00));
+    if (rising) {
+        if (endianess == MSB)
+            cmdReadBytes = CLOCK_BYTES_IN_POS_EDGE_MSB;
+        else
+            cmdReadBytes = CLOCK_BYTES_IN_POS_EDGE_LSB;
+    }
+    else {
+        if (endianess == MSB)
+            cmdReadBytes = CLOCK_BYTES_IN_NEG_EDGE_MSB;
+        else
+            cmdReadBytes = CLOCK_BYTES_IN_NEG_EDGE_LSB;
+    }
+}
+
+void MPSSE::setWriteOutRising(bool rising)
+{
+    if (rising) {
+        if (endianess == MSB)
+            cmdWriteBytes = CLOCK_BYTES_OUT_POS_EDGE_MSB;
+        else
+            cmdWriteBytes = CLOCK_BYTES_OUT_POS_EDGE_LSB;
+    }
+    else {
+        if (endianess == MSB)
+            cmdWriteBytes = CLOCK_BYTES_OUT_NEG_EDGE_MSB;
+        else
+            cmdWriteBytes = CLOCK_BYTES_OUT_NEG_EDGE_LSB;
+    }
 }
 
 void MPSSE::setRefreshInterval(int value)
 {
     refreshInterval = value;
-}
-
-char MPSSE::readByteWithAck(bool ack)
-{
-    setGPIOState(DO, IN, LOW);
-    readBytes(1);
-    sendAck(ack);
-    flushWrite();
-    return rawRead(1).at(0);
-}
-
-//-1 for no ack.
-int MPSSE::writeRegs(char address, char reg, QByteArray data)
-{
-    int ret = 0;
-
-    if (mode == I2C) {
-        start();
-        if (!writeByteWithAck(static_cast<char>(I2C_WRITE_ADDR(address)))) {
-            ret = -1;
-            goto stop_return;
-        }
-        if (!writeByteWithAck(reg)) {
-            ret = -1;
-            goto stop_return;
-        }
-        for (int i = 0; i < data.count(); i++) {
-            if (!writeByteWithAck(data.at(i))) {
-                ret = -1;
-                goto stop_return;
-            }
-        }
-        stop();
-        flushWrite();
-        mutex->unlock();
-    }
-    return 0;
-
-stop_return:
-    stop();
-    flushWrite();
-    return ret;
-}
-
-int MPSSE::readRegs(char address, char reg, char length, QByteArray &array)
-{
-    int ret;
-    array.clear();
-    start();
-    if (!writeByteWithAck(static_cast<char>(I2C_WRITE_ADDR(address)))) {
-        ret = -1;
-        goto stop_return;
-    }
-    if (!writeByteWithAck(reg)) {
-        ret = -1;
-        goto stop_return;
-    }
-    start();
-    if (!writeByteWithAck(static_cast<char>(I2C_READ_ADDR(address)))) {
-        ret = -1;
-        goto stop_return;
-    }
-    for (int i = 0; i < length; i++) {
-        if (i != length - 1)
-            array.append(readByteWithAck(true));
-        else
-            array.append(readByteWithAck(false));
-    }
-
-    stop();
-    return 0;
-stop_return:
-    stop();
-    return ret;
-}
-
-QList<char> MPSSE::detectDevices()
-{
-    QList<char> listDevices = QList<char>();
-    for (int i = 0; i < 128; i++) {
-        start();
-        bool ack = writeByteWithAck(static_cast<char>(i << 1));
-        stop();
-        flushWrite();
-        if (ack)
-            listDevices.append(static_cast<char>(i));
-    }
-
-    return listDevices;
 }
 
 void MPSSE::timerEvent(QTimerEvent *event)

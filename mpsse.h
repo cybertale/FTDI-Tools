@@ -11,8 +11,6 @@
 
 #define CHUNK_SIZE		65535
 #define SPI_RW_SIZE		(63 * 1024)
-#define SPI_TRANSFER_SIZE	512
-#define I2C_TRANSFER_SIZE	64
 
 #define LATENCY_MS		2
 #define TIMEOUT_DIVISOR		1000000
@@ -47,40 +45,6 @@ enum mpsse_commands
     TRISTATE_IO		= 0x9E,
 };
 
-enum pins
-{
-    SK	= 1,
-    DO	= 2,
-    DI	= 4,
-    CS	= 8 ,
-    GPIO0	= 16,
-    GPIO1	= 32,
-    GPIO2	= 64,
-    GPIO3	= 128
-};
-/* Common clock rates */
-enum clock_rates
-{
-    ONE_HUNDRED_KHZ  = 100000,
-    FOUR_HUNDRED_KHZ = 400000,
-    ONE_MHZ 	 = 1000000,
-    TWO_MHZ		 = 2000000,
-    FIVE_MHZ	 = 5000000,
-    SIX_MHZ 	 = 6000000,
-    TEN_MHZ		 = 10000000,
-    TWELVE_MHZ 	 = 12000000,
-    FIFTEEN_MHZ      = 15000000,
-    THIRTY_MHZ 	 = 30000000,
-    SIXTY_MHZ 	 = 60000000
-};
-enum low_bits_status
-{
-    STARTED,
-    STOPPED
-};
-#define DEFAULT_TRIS            (SK | DO | CS | GPIO0 | GPIO1 | GPIO2 | GPIO3)  /* SK/DO/CS and GPIOs are outputs, DI is an input */
-#define DEFAULT_PORT            (SK | CS)       				/* SK and CS are high, all others low */
-
 enum i2c_ack
 {
     ACK  = 0,
@@ -91,27 +55,23 @@ class MPSSE : public QObject
     Q_OBJECT
 
 public:
-/* Supported MPSSE modes */
-enum modes
-{
-    SPI0    = 1,
-    SPI1    = 2,
-    SPI2    = 3,
-    SPI3    = 4,
-    I2C     = 5,
-    GPIO    = 6,
-    BITBANG = 7,
-};
 
-/* FTDI interfaces */
-enum Interface
-{
-    IFACE_ANY	= INTERFACE_ANY,
-    IFACE_A 	= INTERFACE_A,
-    IFACE_B		= INTERFACE_B,
-    IFACE_C		= INTERFACE_C,
-    IFACE_D		= INTERFACE_D
-};
+    enum MPSSE_MODE
+    {
+        SPI,
+        I2C,
+    };
+
+
+    /* FTDI interfaces */
+    enum INTERFACE
+    {
+        IFACE_ANY	= INTERFACE_ANY,
+        IFACE_A 	= INTERFACE_A,
+        IFACE_B		= INTERFACE_B,
+        IFACE_C		= INTERFACE_C,
+        IFACE_D		= INTERFACE_D
+    };
 
 enum GPIO_PINS
 {
@@ -155,12 +115,21 @@ enum GPIO_HIGH_LOW {
 
 #define CLOCK_BYTES_OUT_POS_EDGE_MSB	0x10
 #define CLOCK_BYTES_OUT_NEG_EDGE_MSB	0x11
+#define CLOCK_BYTES_OUT_POS_EDGE_LSB	0x18
+#define CLOCK_BYTES_OUT_NEG_EDGE_LSB	0x19
+
 #define CLOCK_BYTES_IN_POS_EDGE_MSB		0x20
 #define CLOCK_BYTES_IN_NEG_EDGE_MSB		0x24
-#define CLOCK_BITS_OUT_POS_EDGE_MSB		0x12
-#define CLOCK_BITS_IN_POS_EDGE_MSB		0x22
+#define CLOCK_BYTES_IN_POS_EDGE_LSB		0x28
+#define CLOCK_BYTES_IN_NEG_EDGE_LSB		0x2C
+
 #define CLOCK_BYTES_IN_POS_OUT_NEG_MSB	0x31
 #define CLOCK_BYTES_IN_NEG_OUT_POS_MSB	0x34
+#define CLOCK_BYTES_IN_POS_OUT_NEG_LSB	0x39
+#define CLOCK_BYTES_IN_NEG_OUT_POS_LSB	0x3C
+
+#define CLOCK_BITS_OUT_POS_EDGE_MSB		0x12
+#define CLOCK_BITS_IN_POS_EDGE_MSB		0x22
 
 #define I2C_WRITE_ADDR(addr)		(addr << 1)
 #define I2C_READ_ADDR(addr)			((addr << 1) | 1)
@@ -171,29 +140,29 @@ enum GPIO_HIGH_LOW {
 #define READ_GPIO_HIGH					0x83
 
 public:
-    MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, Interface interface);
+    MPSSE(int vid, int pid, MPSSE_MODE mode, int frequency, ENDIANESS endianess, INTERFACE interface);
     ~MPSSE() {}
-    void start();
-    void stop();
+
     bool open();
     void close();
+    virtual void start();
+    virtual void stop();
+    virtual int writeRegs(char address, char reg, QByteArray data) = 0;
+    virtual int readRegs(char address, char reg, char len, QByteArray &array) = 0;
+
 
     bool getIsOpened() const;
 
-    void flushWrite();
-    void setGPIOState(GPIO_PINS pin, GPIO_MODE gpioMode, GPIO_STATE state);
-    void setCSIdleState(GPIO_STATE idle);
-    int gpioWrite(int pin, int direction);
-    int writeRegs(char address, char reg, QByteArray data);
-    int readRegs(char address, char reg, char len, QByteArray &array);
-    void setTristate(uint16_t pins);
-    QList<char> detectDevices();
     char getGPIOState(GPIO_HIGH_LOW high_low);
+    void setGPIOState(GPIO_PINS pin, GPIO_MODE gpioMode, GPIO_STATE state);
+    void setTristate(uint16_t pins);
     void setGPIORefresh(GPIO_HIGH_LOW high_low, bool enable);
+
+    void setCSIdleState(GPIO_STATE idle);
     void setRefreshInterval(int value);
-    QByteArray readWriteBytes(QByteArray buffer);
-    void writeBytes(QByteArray buffer);
-    void readBytes(int length);
+    void flushWrite();
+    void clockBytesOut(QByteArray buffer);
+
 signals:
     void gpioStateChanged(GPIO_HIGH_LOW high_low, char pins);
 
@@ -201,61 +170,46 @@ signals:
 protected:
     void timerEvent(QTimerEvent *event);
 
-private:
-    void flushAfterRead(int tf);
-    void setTimeouts(int timeout);
+protected:
+    void clockBytesInOut(QByteArray buffer);
     QByteArray rawRead(int size);
+    void clockBytesIn(int length);
+    void readBits(char length);
+    void writeBits(char length, char data);
+    void setReadWriteInRising(bool rising);
+    void setReadInRising(bool rising);
+    void setWriteOutRising(bool rising);
+
+private:
+    void setTimeouts(int timeout);
     int rawWrite(QByteArray buf);
     int setClock(uint32_t freq);
     uint16_t freq2div(uint32_t system_clock, uint32_t freq);
     uint32_t div2freq(uint32_t system_clock, uint16_t div);
     int setLoopback(int enable);
     int setMode();
-    bool writeByteWithAck(char data);
-    char readByteWithAck(bool ack);
-    int setBitsHigh(int port);
-    void readBits(char length);
-    void clockBytesOut(QByteArray buffer);
-    void clockBytesIn(int length);
-    void writeBits(char length, char data);
-    void sendAck(bool send);
     void enableCS();
     void disableCS();
+    //TODO software CS.
+
+protected:
+    QMutex *mutex;
 
 private:
     struct ftdi_context ftdi;
-    int flush_after_read;
     int clock;
-    enum low_bits_status status;
     bool isOpened;
     char *description;
-    int xsize;
-    uint8_t tris;
-    uint8_t pstart;
-    uint8_t pstop;
-    uint8_t pidle;
-    uint8_t gpioh;
-    uint8_t trish;
-    uint8_t bitbang;
-    uint8_t tx;
-    uint8_t rx;
-    uint8_t txrx;
-    uint8_t tack;
-    uint8_t rack;
-
     GPIO_STATE idleCS;
 
     int vid;
     int pid;
-    modes mode;
+    MPSSE_MODE mode;
     int frequency;
     ENDIANESS endianess;
-    Interface interface;
-    QByteArray build_block_buffer(uint8_t cmd, QByteArray data);
-    QByteArray internalRead(int size);
+    INTERFACE interface;
 
     QByteArray *bufferWrite;
-    QMutex *mutex;
     QBasicTimer *timerUpdateGPIO;
     bool gpioRefreshHigh, gpioRefreshLow;
     char inputStateHighLast, inputStateLowLast;
@@ -263,7 +217,7 @@ private:
     int refreshInterval;
     char directionHigh, directionLow;
     char outputHigh, outputLow;
-    void clockBytesInOut(QByteArray buffer);
+    char cmdReadWriteBytes, cmdReadBytes, cmdWriteBytes;
 };
 
 #endif // MPSSE_H

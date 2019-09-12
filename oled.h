@@ -1,7 +1,7 @@
 ﻿#ifndef OLED_H
 #define OLED_H
 
-#include "mpsse.h"
+#include "mpsse_i2c.h"
 
 const unsigned char F6x8[][6] =
 {
@@ -223,7 +223,7 @@ enum FONT_SIZE {
 };
     const char address = 0x3C;
 public:
-    OLED(MPSSE *mpsse);
+    OLED(MPSSE_I2C *mpsse);
 
     void fill(char data);
     void printChar(int x, int y, char chr);
