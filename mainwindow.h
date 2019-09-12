@@ -19,6 +19,9 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+public slots:
+    void gpioChanged(MPSSE::GPIO_HIGH_LOW high_low, char bitsChanged);
+
     // QObject interface
 protected:
     void timerEvent(QTimerEvent *event) override;

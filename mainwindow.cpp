@@ -8,7 +8,7 @@
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
-    , mpsse(new MPSSE(0x0403, 0x6014, MPSSE::modes::I2C, 400000, MPSSE::MSB, MPSSE::Interface::IFACE_A))
+    , mpsse(new MPSSE(0x0403, 0x6014, MPSSE::modes::SPI3, 400000, MPSSE::MSB, MPSSE::Interface::IFACE_A))
     , timerUpdate(new QBasicTimer())
 {
     ui->setupUi(this);
@@ -19,11 +19,15 @@ MainWindow::MainWindow(QWidget *parent)
     if (mpsse->open())
         QMessageBox::warning(this, "Error", "MPSSE device open failed.");
 
-    mpsse->setTristate(0x06);
+//    mpsse->setTristate(0x06);
 
-    oled = new OLED(mpsse);
+//    oled = new OLED(mpsse);
 
-    timerUpdate->start(1000, this);
+//    timerUpdate->start(1000, this);
+
+    mpsse->setGPIOState(MPSSE::GPIOH0, MPSSE::IN, MPSSE::HIGH);
+    mpsse->setGPIORefresh(MPSSE::GPIO_HIGH, true);
+    connect(mpsse, &MPSSE::gpioStateChanged, this, &MainWindow::gpioChanged);
 
 //    libMPSSE->setCSIdleState(1);
 }
@@ -35,10 +39,20 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
+void MainWindow::gpioChanged(MPSSE::GPIO_HIGH_LOW high_low, char bitsChanged)
+{
+    QMessageBox::information(this, "gpio state changed", QString().sprintf("%x", bitsChanged));
+}
+
 void MainWindow::onButtonListDevicesClicked()
 {
-    QString stringTime = QTime().currentTime().toString("hh:mm:ss");
-        oled->printString(0, 0, stringTime);
+//    QString stringTime = QTime().currentTime().toString("hh:mm:ss");
+//        oled->printString(0, 0, stringTime);
+    mpsse->start();
+    mpsse->readWriteBytes(QByteArray().append(0xAA));
+//    mpsse->writeBytes(QByteArray().append(0xAA));
+    mpsse->stop();
+    mpsse->flushWrite();
 }
 
 void MainWindow::onCheckGPIO0Clicked()

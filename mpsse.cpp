@@ -4,6 +4,7 @@
 
 MPSSE::MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, Interface interface)
     : QObject ()
+    , idleCS(HIGH)
     , vid(vid)
     , pid(pid)
     , mode(mode)
@@ -29,15 +30,6 @@ MPSSE::MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, I
 //            { 0x0403, 0x6010, "FT2232 Future Technology Devices International, Ltd" },
 //            { 0x0403, 0x6011, "FT4232 Future Technology Devices International, Ltd" },
 //            { 0x0403, 0x6014, "FT232H Future Technology Devices International, Ltd" },
-
-//            /* These devices are based on FT2232 chips, but have not been tested. */
-//            { 0x0403, 0x8878, "Bus Blaster v2 (channel A)" },
-//            { 0x0403, 0x8879, "Bus Blaster v2 (channel B)" },
-//            { 0x0403, 0xBDC8, "Turtelizer JTAG/RS232 Adapter A" },
-//            { 0x0403, 0xCFF8, "Amontec JTAGkey" },
-//            { 0x0403, 0x8A98, "TIAO Multi Protocol Adapter"},
-//            { 0x15BA, 0x0003, "Olimex Ltd. OpenOCD JTAG" },
-//            { 0x15BA, 0x0004, "Olimex Ltd. OpenOCD JTAG TINY" },
 
 //            { 0, 0, NULL }
 //};
@@ -333,9 +325,22 @@ void MPSSE::setGPIOState(GPIO_PINS pin, GPIO_MODE gpioMode, GPIO_STATE state)
     mutex->unlock();
 }
 
+void MPSSE::enableCS()
+{
+    if (idleCS == HIGH)
+        setGPIOState(CS, OUT, LOW);
+    else
+        setGPIOState(CS, OUT, HIGH);
+}
+
+void MPSSE::disableCS()
+{
+    setGPIOState(CS, OUT, idleCS);
+}
+
 void MPSSE::start()
 {
-    setGPIOState(CS, OUT, LOW);
+    enableCS();
     if (mode == I2C) {
         setGPIOState(DO, OUT, HIGH);
         setGPIOState(SK, OUT, HIGH);
@@ -345,7 +350,38 @@ void MPSSE::start()
 
         setGPIOState(DO, OUT, LOW);
         setGPIOState(SK, OUT, LOW);
+    } else {
+        setGPIOState(SK, OUT, HIGH);
+        setGPIOState(DO, OUT, HIGH);
+        setGPIOState(DI, IN, HIGH);
     }
+}
+
+void MPSSE::stop()
+{
+    if (mode == I2C) {
+        setGPIOState(DO, OUT, LOW);
+        setGPIOState(SK, OUT, LOW);
+
+        setGPIOState(DO, OUT, LOW);
+        setGPIOState(SK, OUT, HIGH);
+
+        setGPIOState(DO, OUT, HIGH);
+        setGPIOState(SK, OUT, HIGH);
+    } else {
+        setGPIOState(SK, OUT, HIGH);
+        setGPIOState(DO, OUT, HIGH);
+        setGPIOState(DI, IN, HIGH);
+    }
+    disableCS();
+}
+
+QByteArray MPSSE::readWriteBytes(QByteArray buffer)
+{
+    //Only available in SPI modes.
+    clockBytesInOut(buffer);
+    flushWrite();
+    return rawRead(buffer.length());
 }
 
 void MPSSE::writeBytes(QByteArray buffer)
@@ -356,6 +392,19 @@ void MPSSE::writeBytes(QByteArray buffer)
 void MPSSE::readBytes(int length)
 {
     clockBytesIn(length);
+}
+
+void MPSSE::clockBytesInOut(QByteArray buffer)
+{
+    int length = buffer.count() - 1;
+    mutex->lock();
+    bufferWrite->append(CLOCK_BYTES_IN_POS_OUT_NEG_MSB);
+    bufferWrite->append(static_cast<char>(length & 0xff));
+    bufferWrite->append(static_cast<char>(length >> 8));
+    for (int i = 0; i < buffer.count(); i++)
+        bufferWrite->append(buffer.at(i));
+    bufferWrite->append(static_cast<char>(SEND_IMMEDIATE));
+    mutex->unlock();
 }
 
 void MPSSE::clockBytesOut(QByteArray buffer)
@@ -421,21 +470,6 @@ void MPSSE::writeBits(char length, char data)
     mutex->unlock();
 }
 
-void MPSSE::stop()
-{
-    if (mode == I2C) {
-        setGPIOState(DO, OUT, LOW);
-        setGPIOState(SK, OUT, LOW);
-
-        setGPIOState(DO, OUT, LOW);
-        setGPIOState(SK, OUT, HIGH);
-
-        setGPIOState(DO, OUT, HIGH);
-        setGPIOState(SK, OUT, HIGH);
-    }
-    setGPIOState(CS, OUT, HIGH);
-}
-
 bool MPSSE::writeByteWithAck(char data)
 {
     setGPIOState(DO, OUT, LOW);
@@ -470,9 +504,6 @@ char MPSSE::readByteWithAck(bool ack)
     setGPIOState(DO, IN, LOW);
     readBytes(1);
     sendAck(ack);
-    mutex->lock();
-    bufferWrite->append(static_cast<char>(SEND_IMMEDIATE));	//Flush read data back to PC.
-    mutex->unlock();
     flushWrite();
     return rawRead(1).at(0);
 }

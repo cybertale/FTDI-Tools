@@ -159,6 +159,8 @@ enum GPIO_HIGH_LOW {
 #define CLOCK_BYTES_IN_NEG_EDGE_MSB		0x24
 #define CLOCK_BITS_OUT_POS_EDGE_MSB		0x12
 #define CLOCK_BITS_IN_POS_EDGE_MSB		0x22
+#define CLOCK_BYTES_IN_POS_OUT_NEG_MSB	0x31
+#define CLOCK_BYTES_IN_NEG_OUT_POS_MSB	0x34
 
 #define I2C_WRITE_ADDR(addr)		(addr << 1)
 #define I2C_READ_ADDR(addr)			((addr << 1) | 1)
@@ -171,6 +173,8 @@ enum GPIO_HIGH_LOW {
 public:
     MPSSE(int vid, int pid, modes mode, int frequency, ENDIANESS endianess, Interface interface);
     ~MPSSE() {}
+    void start();
+    void stop();
     bool open();
     void close();
 
@@ -187,7 +191,9 @@ public:
     char getGPIOState(GPIO_HIGH_LOW high_low);
     void setGPIORefresh(GPIO_HIGH_LOW high_low, bool enable);
     void setRefreshInterval(int value);
-
+    QByteArray readWriteBytes(QByteArray buffer);
+    void writeBytes(QByteArray buffer);
+    void readBytes(int length);
 signals:
     void gpioStateChanged(GPIO_HIGH_LOW high_low, char pins);
 
@@ -196,8 +202,6 @@ protected:
     void timerEvent(QTimerEvent *event);
 
 private:
-    void start();
-    void stop();
     void flushAfterRead(int tf);
     void setTimeouts(int timeout);
     QByteArray rawRead(int size);
@@ -210,13 +214,13 @@ private:
     bool writeByteWithAck(char data);
     char readByteWithAck(bool ack);
     int setBitsHigh(int port);
-    void writeBytes(QByteArray buffer);
-    void readBytes(int length);
     void readBits(char length);
     void clockBytesOut(QByteArray buffer);
     void clockBytesIn(int length);
     void writeBits(char length, char data);
     void sendAck(bool send);
+    void enableCS();
+    void disableCS();
 
 private:
     struct ftdi_context ftdi;
@@ -259,6 +263,7 @@ private:
     int refreshInterval;
     char directionHigh, directionLow;
     char outputHigh, outputLow;
+    void clockBytesInOut(QByteArray buffer);
 };
 
 #endif // MPSSE_H
