@@ -3,13 +3,13 @@
 MPSSE_I2C::MPSSE_I2C(int vid, int pid, int frequency, MPSSE::ENDIANESS endianess, MPSSE::INTERFACE interface)
     :MPSSE(vid, pid, I2C, frequency, endianess, interface)
 {
-//    setTristate(0x06);
-    setTristate(0x00);
+    set3PhaseDataClocking(true);
+    setTristate(0x06);
     setGPIOState(SK, OUT, LOW);
 
     setReadWriteInRising(false);
-    setReadInRising(false);
-    setWriteOutRising(true);
+    setReadInRising(true);
+    setWriteOutRising(false);
 }
 
 //-1 for no ack.
@@ -124,7 +124,6 @@ bool MPSSE_I2C::writeByteWithAck(char data)
 {
     setGPIOState(DO, OUT, LOW);
     clockBytesOut(QByteArray().append(data));
-//    setGPIOState(SK, OUT, LOW);
     setGPIOState(DO, IN, LOW);
     setGPIOState(DI, IN, LOW);
     readBits(1);	//Read ack.

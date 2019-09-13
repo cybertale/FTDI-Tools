@@ -26,9 +26,11 @@ public:
     void stop() override;
     int writeRegs(char address, char reg, QByteArray data) override;
     int readRegs(char address, char reg, char len, QByteArray &array) override;
+    void setBitWrite(char value);
 
 private:
     SPI_MODE spiMode;
+    char bitWrite;
 };
 
 #endif // MPSSE_SPI_H

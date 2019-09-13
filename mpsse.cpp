@@ -21,6 +21,9 @@ MPSSE::MPSSE(int vid, int pid, MPSSE_MODE mode, int frequency, ENDIANESS endiane
     , directionLow(0)
     , outputHigh(0)
     , outputLow(0)
+    , cmdReadWriteBytes(CLOCK_BYTES_IN_NEG_OUT_POS_MSB)
+    , cmdReadBytes(CLOCK_BYTES_IN_POS_EDGE_MSB)
+    , cmdWriteBytes(CLOCK_BYTES_OUT_NEG_EDGE_MSB)
 {
     setGPIOState(DO, OUT, LOW);
 }
@@ -34,7 +37,7 @@ MPSSE::MPSSE(int vid, int pid, MPSSE_MODE mode, int frequency, ENDIANESS endiane
 //            { 0, 0, NULL }
 //};
 
-int MPSSE::setLoopback(int enable)
+int MPSSE::setLoopback(bool enable)
 {
     QByteArray buf;
 
@@ -48,71 +51,52 @@ int MPSSE::setLoopback(int enable)
 
 int MPSSE::rawWrite(QByteArray buf)
 {
-    unsigned char bufSend[buf.count()];
+    unsigned char *bufSend = new unsigned char[buf.count()];
+    int ret = 0;
 
     for (int i = 0; i < buf.count(); i++)
         bufSend[i] = static_cast<unsigned char>(buf.at(i));
 
-    if(ftdi_write_data(&ftdi, bufSend, buf.count()) == buf.count())
-        return -1;
-
-    return 0;
-}
-
-int MPSSE::setMode()
-{
-    int ret = 0, setup_commands_size = 0;
-    QByteArray setup_commands;
-    QByteArray buf;
-
-    /* Disable FTDI internal loopback */
-    setLoopback(0);
-
-    /* Ensure adaptive clock is disabled */
-    setup_commands.append(static_cast<char>(DISABLE_ADAPTIVE_CLOCK));
-
-    switch(mode)
-    {
-        case SPI:
-            break;
-        case I2C:
-            /* Enable three phase clock to ensure that I2C data is available on both the rising and falling clock edges */
-            setup_commands.append(static_cast<char>(ENABLE_3_PHASE_CLOCK));
-            break;
-    }
-
-    /* Send any setup commands to the chip */
-    if(ret == 0 && setup_commands_size > 0)
-        ret = rawWrite(setup_commands);
-
-    if(ret == 0)
-        ret = rawWrite(buf);
+    if(ftdi_write_data(&ftdi, bufSend, buf.count()) != buf.count())
+        ret = -1;
+    delete []bufSend;
 
     return ret;
 }
-/* Convert a frequency to a clock divisor */
-uint16_t MPSSE::freq2div(uint32_t system_clock, uint32_t freq)
+
+void MPSSE::setAdaptiveClock(bool adaptive)
 {
-    return (((system_clock / freq) / 2) - 1);
+    mutex->lock();
+    if (adaptive)
+        bufferWrite->append(static_cast<char>(ENABLE_ADAPTIVE_CLOCK));
+    else
+        bufferWrite->append(static_cast<char>(DISABLE_ADAPTIVE_CLOCK));
+    mutex->unlock();
 }
-/* Convert a clock divisor to a frequency */
-uint32_t MPSSE::div2freq(uint32_t system_clock, uint16_t div)
+
+void MPSSE::set3PhaseDataClocking(bool allow)
 {
-    return (system_clock / ((1 + div) * 2));
+    mutex->lock();
+    if (allow)
+        bufferWrite->append(static_cast<char>(ENABLE_3_PHASE_DATA_CLOCKING));
+    else
+        bufferWrite->append(static_cast<char>(DISABLE_3_PHASE_DATA_CLOCKING));
+    mutex->unlock();
 }
 
 /* Read data from the FTDI chip */
 QByteArray MPSSE::rawRead(int size)
 {
     int n = 0, r = 0;
-    unsigned char buf[size];
+    unsigned char *buf = new unsigned char[size];
 
     while(n < size)
     {
-        r = ftdi_read_data(&ftdi, buf, size);
-        if(r < 0) break;
+        if ((r = ftdi_read_data(&ftdi, buf, size)) < 0)
+            break;
         n += r;
     }
+    delete []buf;
 
     QByteArray array;
     for (int i = 0; i < size; i++)
@@ -128,49 +112,45 @@ void MPSSE::setTimeouts(int timeout)
     ftdi.usb_write_timeout = timeout;
 }
 
-int MPSSE::setClock(uint32_t freq)
+//Only used by setClock.
+void MPSSE::setClockDivideBy5(bool divide)
 {
-    int ret = -1;
-    uint32_t system_clock = 0;
-    uint16_t divisor = 0;
-    QByteArray buf;
+    mutex->lock();
+    if (divide)
+        bufferWrite->append(static_cast<char>(ENABLE_CLOCK_DIVIDE_BY_5));
+    else
+        bufferWrite->append(static_cast<char>(DISABLE_CLOCK_DIVIDE_BY_5));
+    mutex->unlock();
+}
 
-    /* Do not call is_valid_context() here, as the FTDI chip may not be completely configured when SetClock is called */
-    if(freq > 6000000)
+int MPSSE::setClock(uint32_t frequency)
+{
+    uint32_t systemClock = 0;
+    uint16_t divisor = 0;
+
+    if(frequency > 6000000)
     {
-        buf.append(TCK_X5);
-        system_clock = 60000000;
+        setClockDivideBy5(false);
+        systemClock = 60000000;
     }
     else
     {
-        buf.append(TCK_D5);
-        system_clock = 12000000;
+        setClockDivideBy5(true);
+        systemClock = 12000000;
     }
 
-    if(!rawWrite(buf))
-    {
-        if(freq <= 0)
-        {
-            divisor = 0xFFFF;
-        }
-        else
-        {
-            divisor = freq2div(system_clock, freq);
-        }
+    if(frequency <= 0)
+        divisor = 0xFFFF;
+    else
+        divisor = static_cast<uint16_t>(systemClock / frequency / 2 - 1);
 
-        buf.clear();
-        buf.append(TCK_DIVISOR);
-        buf.append(divisor & 0xFF);
-        buf.append((divisor >> 8) & 0xFF);
+    mutex->lock();
+    bufferWrite->append(static_cast<char>(TCK_DIVISOR));
+    bufferWrite->append(static_cast<char>(divisor & 0xFF));
+    bufferWrite->append(static_cast<char>((divisor >> 8) & 0xFF));
+    mutex->unlock();
 
-        if(!rawWrite(buf))
-        {
-            clock = div2freq(system_clock, divisor);
-            ret = 0;
-        }
-    }
-
-    return ret;
+    return flushWrite();
 }
 
 bool MPSSE::open()
@@ -193,34 +173,23 @@ bool MPSSE::open()
                     /* Set the read and write timeout periods */
                     setTimeouts(USB_TIMEOUT);
 
-//                    if(mode != BITBANG)
-//                    {
-                        ftdi_set_bitmode(&ftdi, 0, BITMODE_MPSSE);
+                    ftdi_set_bitmode(&ftdi, 0, BITMODE_MPSSE);
 
-                        if(!setClock(static_cast<uint32_t>(frequency)))
-                        {
-                            if(!setMode())
-                            {
-                                /* Give the chip a few mS to initialize */
-//                                usleep(SETUP_DELAY);
+                    if(!setClock(static_cast<uint32_t>(frequency)))
+                    {
+                        setLoopback(false);
 
-                                /*
-                                 * Not all FTDI chips support all the commands that SetMode may have sent.
-                                 * This clears out any errors from unsupported commands that might have been sent during set up.
-                                 */
-                                ftdi_usb_purge_buffers(&ftdi);
-                            }
+                        setAdaptiveClock(false);
+
+                        if (!flushWrite()) {
+                            /*
+                             * Not all FTDI chips support all the commands that SetMode may have sent.
+                             * This clears out any errors from unsupported commands that might have been sent during set up.
+                             */
+                            ftdi_usb_purge_buffers(&ftdi);
                         }
-                        isOpened = true;
-//                    }
-//                    else
-//                    {
-//                        /* Skip the setup functions if we're just operating in BITBANG mode */
-//                        if(ftdi_set_bitmode(&ftdi, 0xFF, BITMODE_BITBANG) == 0)
-//                        {
-//                            isOpened = true;
-//                        }
-//                    }
+                    }
+                    isOpened = true;
                 }
             } else
                 return -1;
@@ -357,12 +326,16 @@ void MPSSE::clockBytesIn(int length)
     mutex->unlock();
 }
 
-void MPSSE::flushWrite()
+int MPSSE::flushWrite()
 {
+    int ret;
+
     mutex->lock();
-    rawWrite(*bufferWrite);
+    ret = rawWrite(*bufferWrite);
     bufferWrite->clear();
     mutex->unlock();
+
+    return ret;
 }
 
 void MPSSE::setTristate(uint16_t pins)

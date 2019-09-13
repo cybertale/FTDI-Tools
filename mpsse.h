@@ -27,29 +27,6 @@
 #define NUM_GPIOL_PINS		4
 #define NUM_GPIO_PINS		12
 
-enum mpsse_commands
-{
-    INVALID_COMMAND		= 0xAB,
-    ENABLE_ADAPTIVE_CLOCK   = 0x96,
-    DISABLE_ADAPTIVE_CLOCK  = 0x97,
-    ENABLE_3_PHASE_CLOCK	= 0x8C,
-    DISABLE_3_PHASE_CLOCK	= 0x8D,
-    TCK_X5			= 0x8A,
-    TCK_D5			= 0x8B,
-    CLOCK_N_CYCLES		= 0x8E,
-    CLOCK_N8_CYCLES		= 0x8F,
-    PULSE_CLOCK_IO_HIGH	= 0x94,
-    PULSE_CLOCK_IO_LOW	= 0x95,
-    CLOCK_N8_CYCLES_IO_HIGH	= 0x9C,
-    CLOCK_N8_CYCLES_IO_LOW	= 0x9D,
-    TRISTATE_IO		= 0x9E,
-};
-
-enum i2c_ack
-{
-    ACK  = 0,
-    NACK = 1
-};
 class MPSSE : public QObject
 {
     Q_OBJECT
@@ -73,71 +50,81 @@ public:
         IFACE_D		= INTERFACE_D
     };
 
-enum GPIO_PINS
-{
-    SK,
-    DO,
-    DI,
-    CS,
-    GPIOL0,
-    GPIOL1,
-    GPIOL2,
-    GPIOL3,
-    GPIOH0,
-    GPIOH1,
-    GPIOH2,
-    GPIOH3,
-    GPIOH4,
-    GPIOH5,
-    GPIOH6,
-    GPIOH7,
-};
+    enum GPIO_PINS
+    {
+        SK,
+        DO,
+        DI,
+        CS,
+        GPIOL0,
+        GPIOL1,
+        GPIOL2,
+        GPIOL3,
+        GPIOH0,
+        GPIOH1,
+        GPIOH2,
+        GPIOH3,
+        GPIOH4,
+        GPIOH5,
+        GPIOH6,
+        GPIOH7,
+    };
 
-enum GPIO_STATE {
-    LOW,
-    HIGH,
-};
+    enum GPIO_STATE {
+        LOW,
+        HIGH,
+    };
 
-enum ENDIANESS {
-    MSB = 0x00,
-    LSB = 0x08,
-};
+    enum ENDIANESS {
+        MSB = 0x00,
+        LSB = 0x08,
+    };
 
-enum GPIO_MODE {
-    IN,
-    OUT,
-};
+    enum GPIO_MODE {
+        IN,
+        OUT,
+    };
 
-enum GPIO_HIGH_LOW {
-    GPIO_LOW,
-    GPIO_HIGH,
-};
+    enum GPIO_HIGH_LOW {
+        GPIO_LOW,
+        GPIO_HIGH,
+    };
 
-#define CLOCK_BYTES_OUT_POS_EDGE_MSB	0x10
-#define CLOCK_BYTES_OUT_NEG_EDGE_MSB	0x11
-#define CLOCK_BYTES_OUT_POS_EDGE_LSB	0x18
-#define CLOCK_BYTES_OUT_NEG_EDGE_LSB	0x19
+private:
+    #define ENABLE_ADAPTIVE_CLOCK			0x96
+    #define DISABLE_ADAPTIVE_CLOCK			0x97
 
-#define CLOCK_BYTES_IN_POS_EDGE_MSB		0x20
-#define CLOCK_BYTES_IN_NEG_EDGE_MSB		0x24
-#define CLOCK_BYTES_IN_POS_EDGE_LSB		0x28
-#define CLOCK_BYTES_IN_NEG_EDGE_LSB		0x2C
+    #define DISABLE_CLOCK_DIVIDE_BY_5		0x8A
+    #define ENABLE_CLOCK_DIVIDE_BY_5		0x8B
 
-#define CLOCK_BYTES_IN_POS_OUT_NEG_MSB	0x31
-#define CLOCK_BYTES_IN_NEG_OUT_POS_MSB	0x34
-#define CLOCK_BYTES_IN_POS_OUT_NEG_LSB	0x39
-#define CLOCK_BYTES_IN_NEG_OUT_POS_LSB	0x3C
+    #define ENABLE_3_PHASE_DATA_CLOCKING	0x8C
+    #define DISABLE_3_PHASE_DATA_CLOCKING	0x8D
 
-#define CLOCK_BITS_OUT_POS_EDGE_MSB		0x12
-#define CLOCK_BITS_IN_POS_EDGE_MSB		0x22
+    #define CLOCK_BYTES_OUT_POS_EDGE_MSB	0x10
+    #define CLOCK_BYTES_OUT_NEG_EDGE_MSB	0x11
+    #define CLOCK_BYTES_OUT_POS_EDGE_LSB	0x18
+    #define CLOCK_BYTES_OUT_NEG_EDGE_LSB	0x19
 
-#define I2C_WRITE_ADDR(addr)		(addr << 1)
-#define I2C_READ_ADDR(addr)			((addr << 1) | 1)
+    #define CLOCK_BYTES_IN_POS_EDGE_MSB		0x20
+    #define CLOCK_BYTES_IN_NEG_EDGE_MSB		0x24
+    #define CLOCK_BYTES_IN_POS_EDGE_LSB		0x28
+    #define CLOCK_BYTES_IN_NEG_EDGE_LSB		0x2C
 
-#define SET_IO_TRISTATE					0x9e
+    #define CLOCK_BYTES_IN_POS_OUT_NEG_MSB	0x31
+    #define CLOCK_BYTES_IN_NEG_OUT_POS_MSB	0x34
+    #define CLOCK_BYTES_IN_POS_OUT_NEG_LSB	0x39
+    #define CLOCK_BYTES_IN_NEG_OUT_POS_LSB	0x3C
 
-#define READ_GPIO_LOW					0x81
-#define READ_GPIO_HIGH					0x83
+    #define CLOCK_BITS_OUT_POS_EDGE_MSB		0x12
+    #define CLOCK_BITS_IN_POS_EDGE_MSB		0x22
+
+    #define I2C_WRITE_ADDR(addr)		(addr << 1)
+    #define I2C_READ_ADDR(addr)			((addr << 1) | 1)
+
+    #define SET_IO_TRISTATE					0x9e
+
+    #define READ_GPIO_LOW					0x81
+    #define READ_GPIO_HIGH					0x83
 
 public:
     MPSSE(int vid, int pid, MPSSE_MODE mode, int frequency, ENDIANESS endianess, INTERFACE interface);
@@ -160,7 +147,7 @@ public:
 
     void setCSIdleState(GPIO_STATE idle);
     void setRefreshInterval(int value);
-    void flushWrite();
+    int flushWrite();
     void clockBytesOut(QByteArray buffer);
 
 signals:
@@ -179,6 +166,8 @@ protected:
     void setReadWriteInRising(bool rising);
     void setReadInRising(bool rising);
     void setWriteOutRising(bool rising);
+    void set3PhaseDataClocking(bool allow);
+    void setAdaptiveClock(bool adaptive);
 
 private:
     void setTimeouts(int timeout);
@@ -186,10 +175,11 @@ private:
     int setClock(uint32_t freq);
     uint16_t freq2div(uint32_t system_clock, uint32_t freq);
     uint32_t div2freq(uint32_t system_clock, uint16_t div);
-    int setLoopback(int enable);
+    int setLoopback(bool enable);
     int setMode();
     void enableCS();
     void disableCS();
+    void setClockDivideBy5(bool divide);
     //TODO software CS.
 
 protected:
